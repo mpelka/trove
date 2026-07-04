@@ -49,6 +49,19 @@ describe("resolveSessionId", () => {
     expect(resolveSessionId(db, "gemini-cli:sess")).toEqual({ kind: "ok", id: "gemini-cli:session-bbbb" });
   });
 
+  it("resolves the DISPLAYED short-id forms (they must round-trip into commands)", () => {
+    expect(resolveSessionId(db, "cc·aaaa1111")).toEqual({
+      kind: "ok",
+      id: "claude-code:aaaa1111-2222",
+    });
+    expect(resolveSessionId(db, "cc:aaaa1111")).toEqual({
+      kind: "ok",
+      id: "claude-code:aaaa1111-2222",
+    });
+    // gemini short ids are the TRAILING hash of the session-… native id
+    expect(resolveSessionId(db, "gem·bbbb")).toEqual({ kind: "ok", id: "gemini-cli:session-bbbb" });
+  });
+
   it("reports ambiguity with the candidate ids", () => {
     const r = resolveSessionId(db, "aaaa");
     expect(r.kind).toBe("ambiguous");

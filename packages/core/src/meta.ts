@@ -5,18 +5,34 @@ export type ResolveResult =
   | { kind: "none" }
   | { kind: "ambiguous"; matches: string[] };
 
-/** Resolve a full id, or a prefix of the id / native id, to a single session id. */
+/** Resolve a full id, a prefix of the id / native id, or a displayed short id
+ *  (`cc·73da3fd6`, `gem·abcd1234`, …) to a single session id. The short forms are
+ *  what trove prints everywhere, so every id-taking command must accept them. */
 export function resolveSessionId(db: Database, ref: string): ResolveResult {
   const exact = db.query("SELECT id FROM sessions WHERE id = ?").get(ref) as
     | { id: string }
     | undefined;
   if (exact) return { kind: "ok", id: exact.id };
-  const rows = db
-    .query("SELECT id FROM sessions WHERE id LIKE ? OR native_id LIKE ? LIMIT 8")
-    .all(`${ref}%`, `${ref}%`) as { id: string }[];
-  if (rows.length === 1) return { kind: "ok", id: rows[0].id };
-  if (rows.length === 0) return { kind: "none" };
-  return { kind: "ambiguous", matches: rows.map((r) => r.id) };
+
+  // Strip a short-id agent prefix (same forms lookupId accepts). `cc·73da3fd6` →
+  // candidate core "73da3fd6"; gemini short ids are the TRAILING hash of the
+  // `session-…` native id, so match those with a suffix-friendly LIKE too.
+  const m = ref.match(/^(cc|gem|cop|agy|claude-code|gemini-cli|copilot|antigravity)[·:](.+)$/i);
+  const candidates = m ? [ref, m[2]] : [ref];
+
+  const seen = new Map<string, true>();
+  for (const cand of candidates) {
+    const rows = db
+      .query(
+        "SELECT id FROM sessions WHERE id LIKE ? OR native_id LIKE ? OR native_id LIKE ? LIMIT 8",
+      )
+      .all(`${cand}%`, `${cand}%`, `session-%${cand}%`) as { id: string }[];
+    for (const r of rows) seen.set(r.id, true);
+  }
+  const matches = [...seen.keys()];
+  if (matches.length === 1) return { kind: "ok", id: matches[0] };
+  if (matches.length === 0) return { kind: "none" };
+  return { kind: "ambiguous", matches };
 }
 
 function ensureMeta(db: Database, id: string): void {

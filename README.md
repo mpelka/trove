@@ -11,9 +11,9 @@ in [GitHub issues](https://github.com/mpelka/trove/issues).
 ## Status
 
 **v0.1 — full stack working end-to-end on real data:**
-- **Adapters:** Claude Code (JSONL) + gemini-cli (per-session JSON). Copilot (shared SQLite) and
-  antigravity are next ([#2](https://github.com/mpelka/trove/issues/2),
-  [#3](https://github.com/mpelka/trove/issues/3)).
+- **Adapters (4):** Claude Code (JSONL), gemini-cli (per-session JSON), Copilot (shared SQLite DB),
+  antigravity (per-conversation SQLite, protobuf steps) — the last two prove the medium-neutral
+  adapter contract (files *or* databases) with zero changes above the adapter layer.
 - **CLI:** sync / search / list / status / show / delete + metadata (name, star, tag, hide).
 - **GUI:** localhost web app (React 19 + [Kumo](https://github.com/cloudflare/kumo) + tRPC,
   Bun-native bundling) — live full-text search with in-body highlighting, search-by-id jump,
@@ -50,8 +50,15 @@ Data lives in `~/.trove/` (override with `TROVE_DIR`): `trove.db` (SQLite + FTS5
 | `trove list` | Browse sessions. `--agent --star --project --tag --sort --limit --all --json`. |
 | `trove status` | Counts per agent, last sync, DB size. |
 | `trove show <id>` | Render an archived session (id or prefix); prints the resume command. |
+| `trove context <msg> [-n depth]` | Messages around a hit (walks parent links where the agent has them). |
+| `trove tree <id>` | A session's branch structure; flat list for agents without parent links. |
+| `trove export <id> [--md\|--json] [-o file]` | Export a session for an external knowledge base. |
 | `trove delete <id> [--source] [-y]` | Remove from trove (tombstoned — sync won't re-add). `--source` also deletes the original file. |
 | `trove name / star / tag / note / hide <id>` | User-owned metadata — kept in a sidecar table, never clobbered by re-sync. |
+| `trove hook` | Print a post-session reindex hook config to apply yourself. |
+
+`search` and `list` also take `--here` (scope to the current git repo). Ids are accepted in any
+form trove prints them: full (`claude-code:<uuid>`), short (`cc·7de43815`), or a unique prefix.
 
 ## Testing
 
