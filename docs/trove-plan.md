@@ -1,3 +1,7 @@
+> **ARCHIVED (2026-07-04).** This document served as the build plan through v0.1 and is kept for
+> the design rationale and verified ground-truth notes. **Live roadmap/tracking has moved to
+> [GitHub issues](https://github.com/mpelka/trove/issues).** Sections below may be stale.
+
 # trove — Build Plan
 
 *A local librarian, search engine, and archive for your CLI coding-agent sessions.*
