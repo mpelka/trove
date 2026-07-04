@@ -24,10 +24,13 @@ import {
   Moon,
   Sun,
   Asterisk,
-  Sparkles,
+  Sparkle,
   Bot,
   CornerDownRight,
+  X,
 } from "lucide-react";
+import { NuqsAdapter } from "nuqs/adapters/react";
+import { useQueryState, parseAsString, parseAsBoolean, parseAsStringEnum } from "nuqs";
 // Cloudflare Kumo (v2.6): styled, accessible components built on Base UI + Tailwind v4.
 // Kumo's design tokens theme the app; the interactive bits use Kumo primitives.
 import {
@@ -145,9 +148,9 @@ function useDebounced<T>(value: T, ms: number): T {
 // Agent marker: a small round, tinted logo per agent. Generic glyphs (not the official
 // trademarked logos): claude=asterisk-spark, gemini=sparkles, copilot=bot.
 const AgentIcon = ({ agent }: { agent: string }) =>
-  agent === "claude-code" ? <Asterisk size={12} strokeWidth={2.5} />
-  : agent === "gemini-cli" ? <Sparkles size={12} strokeWidth={2.2} />
-  : <Bot size={12} strokeWidth={2.2} />;
+  agent === "claude-code" ? <Asterisk size={15} strokeWidth={2.6} />
+  : agent === "gemini-cli" ? <Sparkle size={13} strokeWidth={2.1} />
+  : <Bot size={13} strokeWidth={2.1} />;
 
 function AgentBadge({ agent }: { agent: string }) {
   return (
@@ -256,13 +259,21 @@ function Header({ query, setQuery }: { query: string; setQuery(v: string): void 
       <div className="brand">
         trove<span className="dot">.</span>
       </div>
-      <input
-        className="header-search"
-        autoFocus
-        placeholder="Search every session…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+      <div className="header-search-wrap">
+        <input
+          className="header-search"
+          autoFocus
+          placeholder="Search every session…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+        />
+        {query && (
+          <button className="search-clear" title="clear (Esc)" onClick={() => setQuery("")}>
+            <X size={15} />
+          </button>
+        )}
+      </div>
     </header>
   );
 }
@@ -887,28 +898,35 @@ function Detail({
 }
 
 function App() {
-  const [query, setQuery] = useState("");
-  const [agent, setAgent] = useState<string | undefined>(undefined);
-  const [starOnly, setStarOnly] = useState(false);
-  const [sort, setSort] = useState<"relevance" | "recent">("recent");
-  const [view, setView] = useState<"sessions" | "messages">("messages");
+  // Search state lives in the URL (nuqs) so it's shareable / back-button friendly.
+  const [query, setQuery] = useQueryState("q", parseAsString.withDefault(""));
+  const [agent, setAgent] = useQueryState("agent", parseAsString); // null = all agents
+  const [starOnly, setStarOnly] = useQueryState("star", parseAsBoolean.withDefault(false));
+  const [sort, setSort] = useQueryState(
+    "sort",
+    parseAsStringEnum(["relevance", "recent"]).withDefault("recent"),
+  );
+  const [view, setView] = useQueryState(
+    "view",
+    parseAsStringEnum(["sessions", "messages"]).withDefault("messages"),
+  );
   const [selected, setSelected] = useState<Selected>(null);
   const dq = useDebounced(query, 160);
 
   return (
     <div className="app">
-      <Header query={query} setQuery={setQuery} />
+      <Header query={query} setQuery={(v) => setQuery(v || null)} />
       <div className="body">
         <Sidebar
           query={dq}
-          agent={agent}
-          setAgent={setAgent}
+          agent={agent ?? undefined}
+          setAgent={(a) => setAgent(a ?? null)}
           starOnly={starOnly}
-          setStarOnly={setStarOnly}
+          setStarOnly={(fn) => setStarOnly((p) => fn(p))}
           sort={sort}
-          setSort={setSort}
+          setSort={(s) => setSort(s)}
           view={view}
-          setView={setView}
+          setView={(v) => setView(v)}
           selected={selected}
           onSelect={setSelected}
         />
@@ -926,11 +944,13 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      {/* Kumo TooltipProvider groups tooltips so hovering between icon buttons skips the open delay. */}
-      <TooltipProvider delay={400}>
-        <App />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <NuqsAdapter>
+      <QueryClientProvider client={queryClient}>
+        {/* Kumo TooltipProvider groups tooltips so hovering between icon buttons skips the open delay. */}
+        <TooltipProvider delay={400}>
+          <App />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </NuqsAdapter>
   </StrictMode>,
 );
