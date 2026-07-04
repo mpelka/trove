@@ -10,7 +10,13 @@ import type {
   SourceRef,
 } from "./types.ts";
 
-const TMP_DIR = join(homedir(), ".gemini", "tmp");
+const DEFAULT_TMP_DIR = join(homedir(), ".gemini", "tmp");
+
+/** Discovery root. `TROVE_GEMINI_ROOT` overrides the default `~/.gemini/tmp`;
+ *  read per call (not at module load) so tests can point it at a fixture tree. */
+function tmpDir(): string {
+  return process.env.TROVE_GEMINI_ROOT || DEFAULT_TMP_DIR;
+}
 
 /** One gemini message. Assistant content is a plain string; user content is an
  *  array of parts (or, legacy, a plain string). Fields we don't touch are optional. */
@@ -64,17 +70,18 @@ export const geminiCliAdapter: Adapter = {
   agentId: "gemini-cli",
 
   discoverLocations() {
-    return [TMP_DIR];
+    return [tmpDir()];
   },
 
   async enumerate(): Promise<SourceRef[]> {
+    const root = tmpDir();
     const refs: SourceRef[] = [];
     // One JSON per session under ~/.gemini/tmp/<project>/chats/session-*.json.
     // Some chats dirs are empty — that's fine, the glob just yields nothing there.
     const glob = new Glob("*/chats/session-*.json");
     try {
-      for await (const rel of glob.scan({ cwd: TMP_DIR, onlyFiles: true })) {
-        const path = join(TMP_DIR, rel);
+      for await (const rel of glob.scan({ cwd: root, onlyFiles: true })) {
+        const path = join(root, rel);
         let st;
         try {
           st = statSync(path);

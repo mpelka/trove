@@ -6,7 +6,8 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "trove": "bun run packages/cli/src/index.ts",
-    "gui": "bun run packages/web/src/server.ts"
+    "gui": "bun run packages/web/src/server.ts",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",

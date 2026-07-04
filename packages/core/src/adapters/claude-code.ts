@@ -10,7 +10,13 @@ import type {
   SourceRef,
 } from "./types.ts";
 
-const PROJECTS_DIR = join(homedir(), ".claude", "projects");
+const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+
+/** Discovery root. `TROVE_CC_ROOT` overrides the default `~/.claude/projects`;
+ *  read per call (not at module load) so tests can point it at a fixture tree. */
+function projectsDir(): string {
+  return process.env.TROVE_CC_ROOT || DEFAULT_PROJECTS_DIR;
+}
 
 /** Extract the "meat" from one CC message.content: keep text (incl. code), drop
  *  thinking / tool_result bodies / images; record tool_use as a compact marker. */
@@ -76,20 +82,21 @@ export const claudeCodeAdapter: Adapter = {
   agentId: "claude-code",
 
   discoverLocations() {
-    return [PROJECTS_DIR];
+    return [projectsDir()];
   },
 
   async enumerate(): Promise<SourceRef[]> {
+    const root = projectsDir();
     const refs: SourceRef[] = [];
     const glob = new Glob("**/*.jsonl");
     try {
-      for await (const rel of glob.scan({ cwd: PROJECTS_DIR, onlyFiles: true })) {
+      for await (const rel of glob.scan({ cwd: root, onlyFiles: true })) {
         // Skip subagent transcripts (`<session>/subagents/agent-*.jsonl`) and journals —
         // internal noise; their content echoes back into the parent session.
         const base = basename(rel);
         if (rel.includes("/subagents/") || base.startsWith("agent-") || base === "journal.jsonl")
           continue;
-        const path = join(PROJECTS_DIR, rel);
+        const path = join(root, rel);
         let st;
         try {
           st = statSync(path);
