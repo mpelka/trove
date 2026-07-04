@@ -29,16 +29,7 @@ program
   .description("A local librarian, search engine, and archive for your CLI coding-agent sessions.")
   .version("0.1.0");
 
-function parseDate(s: string | undefined): number | undefined {
-  if (!s) return undefined;
-  const lower = s.toLowerCase().trim();
-  const now = new Date();
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  if (lower === "today") return startOfDay(now);
-  if (lower === "yesterday") return startOfDay(new Date(now.getTime() - 86400000));
-  const t = Date.parse(s);
-  return Number.isNaN(t) ? undefined : t;
-}
+import { parseDate } from "./dates.ts";
 
 function printSyncResult(r: SyncResult): void {
   const parts = [
@@ -123,7 +114,7 @@ program
         project: opts.project,
         tag: opts.tag,
         since,
-        until: parseDate(opts.until),
+        until: parseDate(opts.until, { endOfDay: true }),
       };
 
       if (opts.messages) {
@@ -138,7 +129,7 @@ program
           console.log("  " + h.snippet.replace(/\s+/g, " ").trim());
         }
       } else {
-        const hits = searchSessions(ctx.db, { ...base, groupBySession: true });
+        const hits = searchSessions(ctx.db, base);
         if (opts.json) return void console.log(JSON.stringify(hits, null, 2));
         if (!hits.length) return void console.log(c.dim("No matches."));
         hits.forEach((h, i) => {

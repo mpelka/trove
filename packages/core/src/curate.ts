@@ -60,3 +60,12 @@ export function tombstonedPaths(db: Database): Set<string> {
   const rows = db.query("SELECT source_path FROM tombstones").all() as { source_path: string }[];
   return new Set(rows.map((r) => r.source_path));
 }
+
+/** Stable session ids the user has deleted. Checked in addition to paths so a
+ *  moved/renamed source file (e.g. a renamed project dir) can't resurrect a session. */
+export function tombstonedIds(db: Database): Set<string> {
+  const rows = db.query("SELECT id FROM tombstones WHERE id IS NOT NULL").all() as {
+    id: string;
+  }[];
+  return new Set(rows.map((r) => r.id));
+}

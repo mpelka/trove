@@ -54,13 +54,12 @@ export const appRouter = router({
     .query(({ ctx, input }) => listSessions(ctx.trove.db, input ?? {})),
 
   search: publicProcedure.input(searchInput).query(({ ctx, input }) => {
+    // groupBySession is an API-level switch between the two result shapes; core's
+    // searchMessages/searchSessions don't consume it.
     if (input.groupBySession === false) {
       return { kind: "messages" as const, hits: searchMessages(ctx.trove.db, input) };
     }
-    return {
-      kind: "sessions" as const,
-      hits: searchSessions(ctx.trove.db, { ...input, groupBySession: true }),
-    };
+    return { kind: "sessions" as const, hits: searchSessions(ctx.trove.db, input) };
   }),
 
   resolveId: publicProcedure

@@ -5,7 +5,6 @@ export interface SearchOptions {
   agent?: string;
   limit?: number;
   exact?: boolean;
-  groupBySession?: boolean;
   sort?: "relevance" | "recent"; // relevance = bm25 (default), recent = message time desc
   star?: boolean;
   project?: string;
@@ -87,7 +86,7 @@ interface RawRow {
   starred: number;
 }
 
-function runQuery(db: Database, opts: SearchOptions, cap: number): RawRow[] {
+function buildWhere(opts: SearchOptions): { where: string[]; params: unknown[] } {
   const where: string[] = ["messages_fts MATCH ?"];
   const params: unknown[] = [buildMatch(opts.query, opts.exact ?? false)];
   if (opts.agent) {
@@ -111,10 +110,31 @@ function runQuery(db: Database, opts: SearchOptions, cap: number): RawRow[] {
     where.push("m.timestamp <= ?");
     params.push(opts.until);
   }
+  return { where, params };
+}
+
+function runQuery(db: Database, opts: SearchOptions, cap: number): RawRow[] {
+  const { where, params } = buildWhere(opts);
   const orderBy = opts.sort === "recent" ? "m.timestamp DESC" : "score";
   const sql = `${BASE_SQL} WHERE ${where.join(" AND ")} ORDER BY ${orderBy} LIMIT ?`;
   params.push(cap);
   return db.query(sql).all(...(params as any[])) as RawRow[];
+}
+
+/** Exact per-session match counts over the FULL result set — the over-fetched,
+ *  score-ordered rows would otherwise silently cap matchCount (e.g. "250×" for 600). */
+function countsBySession(db: Database, opts: SearchOptions): Map<string, number> {
+  const { where, params } = buildWhere(opts);
+  const sql = `
+    SELECT m.session_id AS sessionId, COUNT(*) AS n
+    FROM messages_fts
+    JOIN messages m ON m.id = messages_fts.rowid
+    JOIN sessions s ON s.id = m.session_id
+    LEFT JOIN session_meta meta ON meta.session_id = s.id
+    WHERE ${where.join(" AND ")}
+    GROUP BY m.session_id`;
+  const rows = db.query(sql).all(...(params as any[])) as { sessionId: string; n: number }[];
+  return new Map(rows.map((r) => [r.sessionId, r.n]));
 }
 
 function toHit(r: RawRow): SearchHit {
@@ -142,16 +162,14 @@ export function searchMessages(db: Database, opts: SearchOptions): SearchHit[] {
 
 export function searchSessions(db: Database, opts: SearchOptions): SessionHit[] {
   const limit = opts.limit ?? 20;
-  // Over-fetch (rows are score-ordered), then collapse to best-per-session.
+  // Over-fetch (rows are score-ordered) for best-snippet/best-score per session;
+  // exact match counts come from a separate GROUP BY over the full match set.
   const cap = Math.max(limit * 25, 250);
   const rows = runQuery(db, opts, cap);
+  const counts = countsBySession(db, opts);
   const bySession = new Map<string, SessionHit>();
   for (const r of rows) {
-    const existing = bySession.get(r.sessionId);
-    if (existing) {
-      existing.matchCount++;
-      continue;
-    }
+    if (bySession.has(r.sessionId)) continue;
     bySession.set(r.sessionId, {
       sessionId: r.sessionId,
       agent: r.agent,
@@ -160,7 +178,7 @@ export function searchSessions(db: Database, opts: SearchOptions): SessionHit[] 
       customName: r.customName,
       starred: !!r.starred,
       sourceGone: !!r.sourceGone,
-      matchCount: 1,
+      matchCount: counts.get(r.sessionId) ?? 1,
       bestScore: r.score,
       bestSnippet: r.snippet,
       bestTimestamp: r.timestamp,

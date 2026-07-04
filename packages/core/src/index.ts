@@ -1,6 +1,7 @@
 // @trove/core — framework-free domain logic: adapters, ingest, store, search, metadata.
 
 export * from "./adapters/index.ts";
+export { fmtRel, fmtSize, agentLabel, projLabel, shortId } from "./format.ts";
 export * from "./paths.ts";
 export { openDb, getKv, setKv } from "./db/client.ts";
 export type { SessionRow, MessageRow, MetaRow } from "./db/schema.ts";

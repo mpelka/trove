@@ -165,14 +165,15 @@ export interface IdHit {
  */
 export function lookupId(db: Database, raw: string): IdHit | null {
   const q = raw.trim();
-  if (q.length < 4) return null;
 
+  // Numeric = message rowid; checked before the length gate so short ids (1–999) work.
   if (/^\d+$/.test(q)) {
     const row = db.query("SELECT id, session_id FROM messages WHERE id = ?").get(Number(q)) as
       | { id: number; session_id: string }
       | undefined;
     return row ? { sessionId: row.session_id, messageId: row.id, kind: "message" } : null;
   }
+  if (q.length < 4) return null;
 
   const exact = db.query("SELECT id FROM sessions WHERE id = ?").get(q) as { id: string } | undefined;
   if (exact) return { sessionId: exact.id, messageId: null, kind: "session" };

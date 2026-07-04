@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { archiveDir } from "../paths.ts";
 import { setKv } from "../db/client.ts";
-import { tombstonedPaths } from "../curate.ts";
+import { tombstonedPaths, tombstonedIds } from "../curate.ts";
 import type { Adapter } from "../adapters/types.ts";
 
 export interface SyncOptions {
@@ -64,7 +64,13 @@ export async function sync(
     "INSERT INTO messages (uid, session_id, seq, role, parent_uid, timestamp, text) VALUES (?,?,?,?,?,?,?)",
   );
   const ensureMeta = db.query("INSERT OR IGNORE INTO session_meta (session_id) VALUES (?)");
+  const getById = db.query("SELECT source_path, content_hash FROM sessions WHERE id = ?");
+  const updateSourceMeta = db.query(
+    "UPDATE sessions SET source_path = ?, source_mtime = ?, size_bytes = ?, source_gone = 0 WHERE id = ?",
+  );
   const tombstoned = tombstonedPaths(db); // user-deleted sources — never re-import
+  const tombstonedById = tombstonedIds(db); // …even if the file moved to a new path
+  const seenIds = new Set<string>(); // guard: two live sources claiming one session id
 
   for (const adapter of agentAdapters) {
     if (opts.agentIds && !opts.agentIds.includes(adapter.agentId)) continue;
@@ -73,6 +79,9 @@ export async function sync(
     const refs = await adapter.enumerate();
     opts.onProgress?.(`${adapter.agentId}: ${refs.length} candidate session(s)`);
     const seenPaths = new Set<string>();
+    // Full set of live source paths this run — lets the collision logic distinguish a
+    // MOVED file (old path no longer exists) from a true DUPLICATE (both paths live).
+    const livePaths = new Set(refs.map((r) => r.path));
 
     for (const ref of refs) {
       if (tombstoned.has(ref.path)) continue; // user deleted it — respect that
@@ -87,6 +96,7 @@ export async function sync(
         existing.size_bytes === ref.sizeBytes &&
         existing.source_mtime === ref.mtimeMs
       ) {
+        seenIds.add(existing.id); // register so a duplicate path can't clobber this id
         result.unchanged++;
         continue;
       }
@@ -116,6 +126,46 @@ export async function sync(
         (firstUser ? firstUser.replace(/\s+/g, " ").trim().slice(0, 120) || null : null);
 
       const id = `${adapter.agentId}:${s.nativeId}`;
+
+      // Respect user deletion even if the source file moved to a new path.
+      if (tombstonedById.has(id)) continue;
+      // Two live sources claiming the same session id: first wins, warn on the rest —
+      // silently letting the second UPSERT clobber the first would lose a session and
+      // re-parse both files on every future sync.
+      if (seenIds.has(id)) {
+        opts.onProgress?.(`  ! duplicate session id ${id} at ${ref.path} — skipped`);
+        continue;
+      }
+      seenIds.add(id);
+
+      const existingById = getById.get(id) as
+        | { source_path: string; content_hash: string }
+        | undefined;
+      if (existingById && existingById.source_path !== ref.path) {
+        if (livePaths.has(existingById.source_path)) {
+          // The id's original source file still exists — this is a second live file
+          // claiming the same session. Don't clobber; the original wins.
+          opts.onProgress?.(`  ! duplicate session id ${id} at ${ref.path} — skipped`);
+          continue;
+        }
+        // Original path is gone → the file MOVED (e.g. renamed project dir). Same
+        // content: update source metadata in place — otherwise the row never matches
+        // the fast gate and the file re-parses forever. Changed content falls through
+        // to a normal update (which also rewrites source_path via the upsert).
+        if (existingById.content_hash === parsed.contentHash) {
+          updateSourceMeta.run(ref.path, ref.mtimeMs, ref.sizeBytes, id);
+          seenIds.add(id);
+          result.unchanged++;
+          continue;
+        }
+      } else if (existingById && existingById.content_hash === parsed.contentHash) {
+        // Same path, same content, but mtime/size drifted (e.g. touch): refresh
+        // metadata so the fast gate works next run; no message rewrite.
+        updateSourceMeta.run(ref.path, ref.mtimeMs, ref.sizeBytes, id);
+        seenIds.add(id);
+        result.unchanged++;
+        continue;
+      }
 
       let rawPath: string | null = null;
       if (opts.keepRaw && parsed.raw) {
@@ -163,7 +213,7 @@ export async function sync(
       });
       tx();
 
-      if (existing) result.updated++;
+      if (existingById) result.updated++;
       else result.added++;
       bucket.sessions++;
       bucket.messages += s.messages.length;

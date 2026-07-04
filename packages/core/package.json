@@ -5,7 +5,8 @@
   "module": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./adapters": "./src/adapters/index.ts"
+    "./adapters": "./src/adapters/index.ts",
+    "./format": "./src/format.ts"
   },
   "dependencies": {}
 }

@@ -1,6 +1,6 @@
 /**
- * Row shapes for the trove SQLite store. Plain interfaces for now; when @trove/api
- * lands, Drizzle can take over typed access over these exact tables (see trove-plan.md).
+ * Row shapes for the trove SQLite store. Plain interfaces for now; Drizzle could take
+ * over typed access of these exact tables later (see docs/trove-plan.md, archived).
  */
 
 export interface SessionRow {
@@ -43,7 +43,6 @@ export interface MetaRow {
   starred: number;
   tags: string | null; // JSON array
   notes: string | null;
-  pinned: number;
   hidden: number;
 }
 
@@ -93,7 +92,6 @@ CREATE TABLE IF NOT EXISTS session_meta (
   starred INTEGER NOT NULL DEFAULT 0,
   tags TEXT,
   notes TEXT,
-  pinned INTEGER NOT NULL DEFAULT 0,
   hidden INTEGER NOT NULL DEFAULT 0
 );
 
