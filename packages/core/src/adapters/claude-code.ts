@@ -54,6 +54,7 @@ function shellQuote(s: string): string {
 const SYNTHETIC_PREFIXES = [
   "<task-notification>",
   "<system-reminder>",
+  "<local-command-caveat>",
   "<local-command-stdout>",
   "<local-command-stderr>",
   "<command-name>",
