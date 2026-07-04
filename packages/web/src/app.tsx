@@ -24,6 +24,18 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
+// Cloudflare Kumo (v2.6): styled, accessible components built on Base UI + Tailwind v4.
+// Kumo's design tokens theme the app; the interactive bits use Kumo primitives.
+import {
+  Dialog,
+  Popover,
+  Tooltip,
+  TooltipProvider,
+  Tabs,
+  Checkbox,
+  Button,
+  Badge,
+} from "@cloudflare/kumo";
 import type { AppRouter } from "@trove/api";
 
 export const trpc = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: "/api/trpc" })] });
@@ -40,7 +52,8 @@ function initialTheme(): "light" | "dark" {
     return "light";
   }
 }
-document.documentElement.dataset.theme = initialTheme();
+// Kumo reads light/dark from `data-mode` on the root element (set pre-paint in index.html).
+document.documentElement.dataset.mode = initialTheme();
 
 // ── helpers ───────────────────────────────────────────────────────────────
 function fmtRel(ms: number | null | undefined): string {
@@ -62,6 +75,9 @@ function fmtSize(b: number | null | undefined): string {
 }
 const agentClass = (a: string) => (a === "claude-code" ? "cc" : a === "gemini-cli" ? "gemini" : "");
 const agentLabel = (a: string) => (a === "claude-code" ? "CC" : a === "gemini-cli" ? "GEM" : a);
+// Kumo Badge tint per agent (keeps the visual distinction from the hand-rolled version).
+const agentBadgeVariant = (a: string) =>
+  a === "claude-code" ? "orange" : a === "gemini-cli" ? "blue" : "neutral";
 function projLabel(p: string | null): string {
   if (!p) return "no project";
   const parts = p.split("/").filter(Boolean);
@@ -122,56 +138,103 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-// ── settings flyout ───────────────────────────────────────────────────────
-function Menu() {
+// Agent badge, styled via Kumo's Badge with per-agent color variants.
+function AgentBadge({ agent }: { agent: string }) {
+  return (
+    <Badge variant={agentBadgeVariant(agent) as any} className="agentbadge">
+      {agentLabel(agent)}
+    </Badge>
+  );
+}
+
+// Icon button with a Kumo Tooltip. `render` makes the trigger the button itself
+// (no extra wrapper element that would break the flex layout).
+function IconButton({
+  label,
+  className,
+  onClick,
+  children,
+}: {
+  label: string;
+  className?: string;
+  onClick?(): void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip
+      content={label}
+      side="bottom"
+      render={
+        <button className={className ?? "iconbtn"} aria-label={label} onClick={onClick}>
+          {children}
+        </button>
+      }
+    />
+  );
+}
+
+// ── settings flyout (Kumo Popover) ──────────────────────────────────────────
+function SettingsMenu() {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState(initialTheme());
   const { data } = useQuery({ queryKey: ["status"], queryFn: () => trpc.status.query() });
   const sync = useMutation({ mutationFn: () => trpc.sync.mutate({}), onSuccess: () => qc.invalidateQueries() });
   const toggleTheme = () => {
     const n = theme === "light" ? "dark" : "light";
     setTheme(n);
-    document.documentElement.dataset.theme = n;
+    document.documentElement.dataset.mode = n;
     try {
       localStorage.setItem("trove-theme", n);
     } catch {}
   };
   return (
     <div className="menu">
-      <button className="iconbtn" title="menu" onClick={() => setOpen((o) => !o)}>
-        <MenuIcon size={16} />
-      </button>
-      {open && (
-        <>
-          <div className="menu-backdrop" onClick={() => setOpen(false)} />
-          <div className="menu-panel">
-            <div className="st">
-              <span>sessions</span>
-              <b>{data?.totalSessions ?? "—"}</b>
-            </div>
-            <div className="st">
-              <span>messages</span>
-              <b>{data?.totalMessages?.toLocaleString() ?? "—"}</b>
-            </div>
-            {data?.perAgent.map((a) => (
-              <div className="st" key={a.agent}>
-                <span className={`badge ${agentClass(a.agent)}`}>{agentLabel(a.agent)}</span>
-                <b>{a.sessions}</b>
-              </div>
-            ))}
-            <hr />
-            <div className="mrow">
-              <button className="btn" disabled={sync.isPending} onClick={() => sync.mutate()}>
-                <RefreshCw size={13} /> {sync.isPending ? "syncing…" : "sync"}
-              </button>
-              <button className="btn" onClick={toggleTheme}>
-                {theme === "light" ? <Moon size={13} /> : <Sun size={13} />} {theme === "light" ? "dark" : "light"}
-              </button>
-            </div>
+      <Popover>
+        <Popover.Trigger
+          render={
+            <button className="iconbtn" aria-label="menu">
+              <MenuIcon size={16} />
+            </button>
+          }
+        />
+        <Popover.Content side="bottom" align="start" sideOffset={6} className="menu-panel">
+          <div className="st">
+            <span>sessions</span>
+            <b>{data?.totalSessions ?? "—"}</b>
           </div>
-        </>
-      )}
+          <div className="st">
+            <span>messages</span>
+            <b>{data?.totalMessages?.toLocaleString() ?? "—"}</b>
+          </div>
+          {data?.perAgent.map((a) => (
+            <div className="st" key={a.agent}>
+              <AgentBadge agent={a.agent} />
+              <b>{a.sessions}</b>
+            </div>
+          ))}
+          <hr />
+          <div className="mrow">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={sync.isPending}
+              loading={sync.isPending}
+              icon={<RefreshCw size={13} />}
+              onClick={() => sync.mutate()}
+            >
+              {sync.isPending ? "syncing…" : "sync"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
+              onClick={toggleTheme}
+            >
+              {theme === "light" ? "dark" : "light"}
+            </Button>
+          </div>
+        </Popover.Content>
+      </Popover>
     </div>
   );
 }
@@ -179,7 +242,7 @@ function Menu() {
 function Header({ query, setQuery }: { query: string; setQuery(v: string): void }) {
   return (
     <header className="header">
-      <Menu />
+      <SettingsMenu />
       <div className="brand">
         trove<span className="dot">.</span>
       </div>
@@ -211,7 +274,7 @@ function SessionRow(p: {
   return (
     <div className={`row${p.selected ? " sel" : ""}`} onClick={p.onSelect}>
       <div className="top">
-        <span className={`badge ${agentClass(p.agent)}`}>{agentLabel(p.agent)}</span>
+        <AgentBadge agent={p.agent} />
         <span className="name">{p.name || "(untitled)"}</span>
         {p.matchCount != null && <span className="count-pill">{p.matchCount}×</span>}
         <span
@@ -230,7 +293,11 @@ function SessionRow(p: {
         </div>
       )}
       <div className="sub">
-        {p.gone && <span className="badge gone">gone</span>}
+        {p.gone && (
+          <Badge variant="neutral" className="gonebadge">
+            gone
+          </Badge>
+        )}
         <span className="proj" title={p.project ?? ""}>
           {projLabel(p.project)}
         </span>
@@ -252,7 +319,7 @@ function MessageRow(p: {
   return (
     <div className={`row${p.selected ? " sel" : ""}`} onClick={p.onSelect}>
       <div className="top">
-        <span className={`badge ${agentClass(p.agent)}`}>{agentLabel(p.agent)}</span>
+        <AgentBadge agent={p.agent} />
         <span className="name">{p.name || "(untitled)"}</span>
         <span className="role">{p.role}</span>
       </div>
@@ -389,23 +456,29 @@ function Sidebar(props: {
         {searching && (
           <div className="controls">
             <span className="lbl">sort</span>
-            <div className="seg">
-              <button className={sort === "relevance" ? "on" : ""} onClick={() => setSort("relevance")}>
-                Best match
-              </button>
-              <button className={sort === "recent" ? "on" : ""} onClick={() => setSort("recent")}>
-                Recent
-              </button>
-            </div>
+            <Tabs
+              variant="segmented"
+              size="sm"
+              className="seg"
+              value={sort}
+              onValueChange={(v) => setSort(v as "relevance" | "recent")}
+              tabs={[
+                { value: "relevance", label: "Best match" },
+                { value: "recent", label: "Recent" },
+              ]}
+            />
             <span className="lbl">view</span>
-            <div className="seg">
-              <button className={view === "sessions" ? "on" : ""} onClick={() => setView("sessions")}>
-                Conversations
-              </button>
-              <button className={view === "messages" ? "on" : ""} onClick={() => setView("messages")}>
-                Messages
-              </button>
-            </div>
+            <Tabs
+              variant="segmented"
+              size="sm"
+              className="seg"
+              value={view}
+              onValueChange={(v) => setView(v as "sessions" | "messages")}
+              tabs={[
+                { value: "sessions", label: "Conversations" },
+                { value: "messages", label: "Messages" },
+              ]}
+            />
           </div>
         )}
       </div>
@@ -532,38 +605,49 @@ const MessageList = memo(function MessageList(props: {
   );
 });
 
-// ── delete modal ──────────────────────────────────────────────────────────
+// ── delete dialog (Kumo Dialog + Checkbox) ───────────────────────────────────
 function ConfirmDelete({
   name,
-  onCancel,
+  open,
+  onOpenChange,
   onConfirm,
 }: {
   name: string;
-  onCancel(): void;
+  open: boolean;
+  onOpenChange(open: boolean): void;
   onConfirm(deleteSource: boolean): void;
 }) {
   const [deleteSource, setDeleteSource] = useState(false);
+  // Reset the checkbox each time the dialog opens.
+  useEffect(() => {
+    if (open) setDeleteSource(false);
+  }, [open]);
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Delete conversation?</h3>
-        <p>
+    // role="alertdialog": destructive flow, not dismissible via outside click.
+    <Dialog.Root role="alertdialog" open={open} onOpenChange={onOpenChange}>
+      <Dialog size="sm" className="modal">
+        <Dialog.Title className="modal-title">Delete conversation?</Dialog.Title>
+        <Dialog.Description className="modal-desc">
           Remove <b>{name}</b> from trove. It won't come back on the next sync.
-        </p>
-        <label className="modal-check">
-          <input type="checkbox" checked={deleteSource} onChange={(e) => setDeleteSource(e.target.checked)} />
-          Also delete the original session file <span className="warn">(cannot be undone)</span>
-        </label>
+        </Dialog.Description>
+        <Checkbox
+          className="modal-check"
+          checked={deleteSource}
+          onCheckedChange={(v: boolean) => setDeleteSource(Boolean(v))}
+          label={
+            <>
+              Also delete the original session file <span className="warn">(cannot be undone)</span>
+            </>
+          }
+        />
         <div className="modal-actions">
-          <button className="btn" onClick={onCancel}>
-            Cancel
-          </button>
-          <button className="btn danger" onClick={() => onConfirm(deleteSource)}>
-            <Trash2 size={13} /> Delete
-          </button>
+          <Dialog.Close render={<Button variant="secondary">Cancel</Button>} />
+          <Button variant="destructive" icon={<Trash2 size={13} />} onClick={() => onConfirm(deleteSource)}>
+            Delete
+          </Button>
         </div>
-      </div>
-    </div>
+      </Dialog>
+    </Dialog.Root>
   );
 }
 
@@ -632,7 +716,7 @@ function DetailHead({
   return (
     <div className="detail-head">
       <div className="dh-title">
-        <span className={`badge ${agentClass(s.agent)}`}>{agentLabel(s.agent)}</span>
+        <AgentBadge agent={s.agent} />
         {editing ? (
           <input
             autoFocus
@@ -650,27 +734,35 @@ function DetailHead({
               {s.name}
             </span>
             {s.customName && <Pencil size={12} className="custom-mark" aria-label="custom name" />}
-            {s.sourceGone && <span className="badge gone">gone</span>}
+            {s.sourceGone && (
+              <Badge variant="neutral" className="gonebadge">
+                gone
+              </Badge>
+            )}
           </>
         )}
         <div className="dh-actions">
-          <button className={`iconbtn${s.starred ? " on" : ""}`} title="star" onClick={() => mStar.mutate(!s.starred)}>
+          <IconButton
+            label="star"
+            className={`iconbtn${s.starred ? " on" : ""}`}
+            onClick={() => mStar.mutate(!s.starred)}
+          >
             <Star size={15} fill={s.starred ? "currentColor" : "none"} />
-          </button>
-          <button className="iconbtn" title="rename" onClick={startEdit}>
+          </IconButton>
+          <IconButton label="rename" onClick={startEdit}>
             <Pencil size={14} />
-          </button>
+          </IconButton>
           {resumeCommand && (
-            <button className="iconbtn" title="copy resume command" onClick={() => copy(resumeCommand, "resume")}>
+            <IconButton label="copy resume command" onClick={() => copy(resumeCommand, "resume")}>
               {copied === "resume" ? <Check size={14} /> : <Copy size={14} />}
-            </button>
+            </IconButton>
           )}
-          <button className="iconbtn" title={expandAll ? "collapse all" : "expand all"} onClick={onToggleExpand}>
+          <IconButton label={expandAll ? "collapse all" : "expand all"} onClick={onToggleExpand}>
             {expandAll ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
-          </button>
-          <button className="iconbtn danger" title="delete" onClick={() => setConfirming(true)}>
+          </IconButton>
+          <IconButton label="delete" className="iconbtn danger" onClick={() => setConfirming(true)}>
             <Trash2 size={14} />
-          </button>
+          </IconButton>
         </div>
       </div>
       <div className="dh-meta">
@@ -694,16 +786,15 @@ function DetailHead({
           {copied === "id" ? " ✓" : ""}
         </span>
       </div>
-      {confirming && (
-        <ConfirmDelete
-          name={s.name}
-          onCancel={() => setConfirming(false)}
-          onConfirm={(deleteSource) => {
-            setConfirming(false);
-            mDelete.mutate(deleteSource);
-          }}
-        />
-      )}
+      <ConfirmDelete
+        name={s.name}
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={(deleteSource) => {
+          setConfirming(false);
+          mDelete.mutate(deleteSource);
+        }}
+      />
     </div>
   );
 }
@@ -804,7 +895,10 @@ function App() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      {/* Kumo TooltipProvider groups tooltips so hovering between icon buttons skips the open delay. */}
+      <TooltipProvider delay={400}>
+        <App />
+      </TooltipProvider>
     </QueryClientProvider>
   </StrictMode>,
 );
