@@ -18,9 +18,16 @@ import {
   addTags,
   removeTags,
   getAdapter,
+  getContext,
+  getTree,
+  exportSession,
+  lookupId,
+  repoRoot,
   type TroveContext,
   type SyncResult,
+  type TreeNode,
 } from "@trove/core";
+import { writeFileSync } from "node:fs";
 import { c, fmtSize, fmtDate, fmtRelative, shortId, projectName } from "./format.ts";
 
 const program = new Command();
@@ -91,6 +98,7 @@ program
   .option("--messages", "show individual message hits (default: group by session)")
   .option("--star", "only starred sessions")
   .option("--project <p>", "filter by origin project (substring)")
+  .option("--here", "filter by the current repo (git root of cwd)")
   .option("--tag <t>", "filter by tag")
   .option("--since <date>", "on/after date (YYYY-MM-DD | today | yesterday)")
   .option("--until <date>", "on/before date")
@@ -111,7 +119,7 @@ program
         limit: Number(opts.limit) || 20,
         exact: !!opts.exact,
         star: !!opts.star,
-        project: opts.project,
+        project: opts.here ? repoRoot() : opts.project,
         tag: opts.tag,
         since,
         until: parseDate(opts.until, { endOfDay: true }),
@@ -155,6 +163,7 @@ program
   .option("--agent <id>", "filter by agent")
   .option("--star", "only starred")
   .option("--project <p>", "filter by origin project (substring)")
+  .option("--here", "filter by the current repo (git root of cwd)")
   .option("--tag <t>", "filter by tag")
   .option("--sort <s>", "updated | created | name | turns", "updated")
   .option("-n, --limit <n>", "max rows", "50")
@@ -166,7 +175,7 @@ program
       const rows = listSessions(ctx.db, {
         agent: opts.agent,
         star: !!opts.star,
-        project: opts.project,
+        project: opts.here ? repoRoot() : opts.project,
         tag: opts.tag,
         sort: opts.sort,
         limit: Number(opts.limit) || 50,
@@ -243,6 +252,113 @@ program
         console.log();
       }
       if (detail.messages.length > limit) console.log(c.dim(`… ${detail.messages.length - limit} more (raise --limit)`));
+    } finally {
+      ctx.close();
+    }
+  });
+
+// ── context ───────────────────────────────────────────────────────────────────
+program
+  .command("context")
+  .description("Show a message with the messages surrounding it in its session")
+  .argument("<messageId>", "message id (or a message uid / short id)")
+  .option("-n, --depth <n>", "messages before/after", "3")
+  .option("--json", "output JSON")
+  .action((ref: string, opts) => {
+    const ctx = openContext();
+    try {
+      // Accept a numeric rowid directly, or resolve a uid / short id to one.
+      let messageId: number | null = /^\d+$/.test(ref.trim()) ? Number(ref.trim()) : null;
+      if (messageId == null) {
+        const hit = lookupId(ctx.db, ref);
+        if (hit?.kind === "message" && hit.messageId != null) messageId = hit.messageId;
+      }
+      if (messageId == null) {
+        console.error(c.red(`No message matching "${ref}".`));
+        ctx.close();
+        process.exit(1);
+      }
+      const result = getContext(ctx.db, messageId, Number(opts.depth) || 3);
+      if (!result) return void console.error(c.red("not found"));
+      if (opts.json) return void console.log(JSON.stringify(result, null, 2));
+      const detail = getSessionDetail(ctx.db, result.sessionId);
+      if (detail) {
+        const s = detail.session;
+        console.log(c.bold(s.name) + c.dim(`  ${shortId(s.id)}`));
+        console.log(c.dim(`  ${projectName(s.projectPath)}`));
+        console.log();
+      }
+      for (const m of result.messages) {
+        const who =
+          m.role === "user" ? c.green("▸ user")
+          : m.role === "assistant" ? c.cyan("● assistant")
+          : c.dim("· " + m.role);
+        const marker = m.isTarget ? c.yellow(" ◀ #" + m.id) : c.dim(" #" + m.id);
+        console.log(who + marker + c.dim("  " + fmtRelative(m.timestamp)));
+        const body = m.text.length > 2000 ? m.text.slice(0, 2000) + c.dim(" …") : m.text;
+        console.log(m.isTarget ? c.bold(body) : body);
+        console.log();
+      }
+    } finally {
+      ctx.close();
+    }
+  });
+
+// ── tree ──────────────────────────────────────────────────────────────────────
+program
+  .command("tree")
+  .description("Show a session's messages as a reply tree (parent_uid), or flat if unlinked")
+  .argument("<id>", "session id or prefix")
+  .option("--json", "output JSON")
+  .action((ref: string, opts) => {
+    const ctx = openContext();
+    try {
+      const id = resolveOrExit(ctx, ref);
+      const tree = getTree(ctx.db, id);
+      if (!tree) return void console.error(c.red("not found"));
+      if (opts.json) return void console.log(JSON.stringify(tree, null, 2));
+      const detail = getSessionDetail(ctx.db, id);
+      if (detail) {
+        console.log(c.bold(detail.session.name) + c.dim(`  ${shortId(id)}`));
+        console.log(c.dim(`  ${tree.linked ? "linked tree" : "flat (no parent links)"}`));
+        console.log();
+      }
+      const glyph = (role: string) =>
+        role === "user" ? c.green("▸")
+        : role === "assistant" ? c.cyan("●")
+        : c.dim("·");
+      const printNode = (n: TreeNode, indent: string) => {
+        const line = n.text.replace(/\s+/g, " ").trim().slice(0, 80);
+        console.log(`${indent}${glyph(n.role)} ${c.dim("#" + n.id)} ${line}`);
+        for (const child of n.children) printNode(child, indent + "  ");
+      };
+      for (const root of tree.roots) printNode(root, "");
+    } finally {
+      ctx.close();
+    }
+  });
+
+// ── export ────────────────────────────────────────────────────────────────────
+program
+  .command("export")
+  .description("Export a session as markdown or JSON")
+  .argument("<id>", "session id or prefix")
+  .option("--md", "markdown (default)")
+  .option("--json", "JSON")
+  .option("-o, --out <file>", "write to a file instead of stdout")
+  .action((ref: string, opts) => {
+    const ctx = openContext();
+    try {
+      const id = resolveOrExit(ctx, ref);
+      const format = opts.json ? "json" : "md";
+      const rendered = exportSession(ctx.db, id, format);
+      if (rendered == null) return void console.error(c.red("not found"));
+      if (opts.out) {
+        writeFileSync(opts.out, rendered);
+        console.error(c.green("wrote ") + opts.out + c.dim(` (${format})`));
+      } else {
+        console.log(rendered);
+      }
     } finally {
       ctx.close();
     }

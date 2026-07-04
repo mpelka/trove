@@ -190,7 +190,31 @@ describe("geminiCliAdapter.enumerate", () => {
 });
 
 describe("geminiCliAdapter.buildResumeCommand", () => {
-  it("is unsupported (returns null)", () => {
+  it("returns null without a raw archive (slim copy can't round-trip)", () => {
     expect(geminiCliAdapter.buildResumeCommand!({ nativeId: "session-x" })).toBeNull();
+    expect(
+      geminiCliAdapter.buildResumeCommand!({ nativeId: "session-x", projectPath: "/p" }),
+    ).toBeNull();
+  });
+
+  it("decompresses the raw archive to a temp file and resumes via --session-file", () => {
+    const cmd = geminiCliAdapter.buildResumeCommand!({
+      nativeId: "session-x",
+      rawPath: "/Users/x/.trove/archive/gem.json.gz",
+    })!;
+    expect(cmd).toContain("RAW=$(mktemp /tmp/trove-resume-XXXXXX.json)");
+    expect(cmd).toContain("gunzip -c '/Users/x/.trove/archive/gem.json.gz' > \"$RAW\"");
+    expect(cmd).toContain('gemini --session-file "$RAW"');
+    expect(cmd).not.toContain("cd "); // no project prefix when projectPath is absent
+  });
+
+  it("prefixes a cd into the project when projectPath is given (shell-quoted)", () => {
+    const cmd = geminiCliAdapter.buildResumeCommand!({
+      nativeId: "session-x",
+      projectPath: "/Users/x/my proj",
+      rawPath: "/a/b.json.gz",
+    })!;
+    expect(cmd.startsWith("cd '/Users/x/my proj' && ")).toBe(true);
+    expect(cmd).toContain("gunzip -c '/a/b.json.gz'");
   });
 });

@@ -9,6 +9,7 @@ import type {
   ParseResult,
   SourceRef,
 } from "./types.ts";
+import { shellQuote } from "./shell.ts";
 
 const DEFAULT_TMP_DIR = join(homedir(), ".gemini", "tmp");
 
@@ -219,9 +220,16 @@ export const geminiCliAdapter: Adapter = {
     return resolveProjectFromFile(file);
   },
 
-  buildResumeCommand(): string | null {
-    // TODO: gemini resume needs `--session-file <rawpath>` plumbing that doesn't
-    // exist yet. `gemini --session-file` is the robust resume path — wire it later.
-    return null;
+  /** Resume via `gemini --session-file`. This needs the *raw* session JSON, so it only
+   *  works when a gzipped raw archive was kept (--keep-raw); we decompress it to a temp
+   *  file first. A slim (raw-less) copy can't round-trip → null. */
+  buildResumeCommand(input): string | null {
+    if (!input.rawPath) return null;
+    const cd = input.projectPath ? `cd ${shellQuote(input.projectPath)} && ` : "";
+    return (
+      `${cd}RAW=$(mktemp /tmp/trove-resume-XXXXXX.json) && ` +
+      `gunzip -c ${shellQuote(input.rawPath)} > "$RAW" && ` +
+      `gemini --session-file "$RAW"`
+    );
   },
 };

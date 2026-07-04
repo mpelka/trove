@@ -7,6 +7,8 @@ import {
   lookupId,
   searchSessions,
   searchMessages,
+  getContext,
+  getTree,
   sync,
   deleteSession,
   setName,
@@ -78,6 +80,14 @@ export const appRouter = router({
       }) ?? null;
     return { ...detail, resumeCommand };
   }),
+
+  context: publicProcedure
+    .input(z.object({ messageId: z.number().int().positive(), depth: z.number().int().positive().max(50).optional() }))
+    .query(({ ctx, input }) => getContext(ctx.trove.db, input.messageId, input.depth)),
+
+  tree: publicProcedure
+    .input(idInput)
+    .query(({ ctx, input }) => getTree(ctx.trove.db, input.id)),
 
   sync: publicProcedure
     .input(z.object({ keepRaw: z.boolean().optional(), agentIds: z.array(z.string()).optional() }).optional())

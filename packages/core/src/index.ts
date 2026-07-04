@@ -27,6 +27,16 @@ export {
 } from "./queries.ts";
 export { deleteSession, tombstonedPaths, type DeleteResult } from "./curate.ts";
 export {
+  getContext,
+  getTree,
+  type ContextMessage,
+  type ContextResult,
+  type TreeNode,
+  type TreeResult,
+} from "./context-tree.ts";
+export { exportSession, type ExportFormat } from "./export.ts";
+export { repoRoot } from "./repo.ts";
+export {
   resolveSessionId,
   setName,
   setStar,

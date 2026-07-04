@@ -9,6 +9,7 @@ import type {
   ParseResult,
   SourceRef,
 } from "./types.ts";
+import { shellQuote } from "./shell.ts";
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
@@ -49,10 +50,6 @@ function extractContent(content: unknown): { text: string; hasProse: boolean } {
     return { text: `[used: ${uniq.join(", ")}]`, hasProse: false };
   }
   return { text: "", hasProse: false };
-}
-
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 // Harness-injected "user" turns that aren't the human talking (background-task results,

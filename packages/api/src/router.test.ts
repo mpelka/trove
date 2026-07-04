@@ -123,6 +123,27 @@ describe("appRouter", () => {
     expect((await caller.list()).map((s) => s.id)).toEqual([CC_ID]);
   });
 
+  it("context returns the target message with surrounding messages", async () => {
+    const mid = (
+      trove.db.query("SELECT id FROM messages WHERE uid = 'cc-m2'").get() as { id: number }
+    ).id;
+    const r = await caller.context({ messageId: mid });
+    expect(r).not.toBeNull();
+    expect(r!.target.id).toBe(mid);
+    expect(r!.messages.find((m) => m.isTarget)!.id).toBe(mid);
+    // cc-m2 has parent cc-m1 → the chain includes the earlier message
+    expect(r!.messages.map((m) => m.uid)).toContain("cc-m1");
+  });
+
+  it("tree returns a session's messages as a tree", async () => {
+    // CC messages are seeded with null parent_uid → flat degrade.
+    const t = await caller.tree({ id: CC_ID });
+    expect(t).not.toBeNull();
+    expect(t!.roots.length).toBe(2);
+    expect(t!.roots.map((n) => n.uid)).toEqual(["cc-m1", "cc-m2"]);
+    expect(await caller.tree({ id: "nope:missing" })).toBeNull();
+  });
+
   it("rejects invalid input via zod", async () => {
     await expect(caller.search({ query: "" })).rejects.toThrow(); // min(1)
     await expect(caller.search({ query: "x", limit: 500 })).rejects.toThrow(); // max(200)
