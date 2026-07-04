@@ -95,7 +95,8 @@ body {
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .seg button { background: var(--panel); border: none; color: var(--dim); cursor: pointer; font-size: 11px; padding: 3px 9px; border-right: 1px solid var(--border); }
 .seg button:last-child { border-right: none; }
-.seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+/* Base UI ToggleGroup marks the active toggle with [data-pressed]. */
+.seg button.on, .seg button[data-pressed] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .controls .lbl { color: var(--dim-2); font-size: 11px; }
 
 .list { overflow-y: auto; flex: 1; min-height: 0; }
@@ -180,8 +181,9 @@ mark { background: var(--mark-bg); color: var(--mark); font-weight: 600; border-
 .custom-mark { color: var(--accent); flex: none; }
 .iconbtn.danger:hover { color: var(--danger); border-color: var(--danger); }
 
-/* modal */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 40; display: flex; align-items: center; justify-content: center; }
+/* modal (Base UI Dialog: Backdrop = overlay, Viewport = centering container) */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 40; }
+.modal-viewport { position: fixed; inset: 0; z-index: 41; display: flex; align-items: center; justify-content: center; }
 .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 410px; max-width: 90vw; box-shadow: 0 14px 44px rgba(0,0,0,0.22); }
 .modal h3 { margin: 0 0 8px; font-size: 16px; }
 .modal p { margin: 0 0 14px; color: var(--dim); font-size: 13px; }
@@ -190,3 +192,12 @@ mark { background: var(--mark-bg); color: var(--mark); font-weight: 600; border-
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .btn.danger { color: #fff; background: var(--danger); border-color: var(--danger); }
 .btn.danger:hover { filter: brightness(1.06); color: #fff; }
+
+/* Base UI Checkbox: styled box + indicator (checkmark shown when checked) */
+.cbx { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); color: #fff; }
+.modal-check[data-checked] .cbx { background: var(--accent); border-color: var(--accent); }
+.cbx-ind { display: inline-flex; align-items: center; justify-content: center; }
+.cbx-ind[data-unchecked] { display: none; }
+
+/* Base UI Tooltip popup */
+.tt { background: var(--text); color: var(--panel); font-size: 11px; padding: 3px 7px; border-radius: 5px; box-shadow: 0 4px 14px rgba(0,0,0,0.18); z-index: 60; pointer-events: none; }

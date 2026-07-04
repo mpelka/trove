@@ -24,6 +24,14 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
+// Base UI unstyled primitives (v1.0.0-rc): interactive/accessible behavior,
+// styled with the existing CSS classes so the visual design is unchanged.
+import { Dialog } from "@base-ui-components/react/dialog";
+import { Popover } from "@base-ui-components/react/popover";
+import { ToggleGroup } from "@base-ui-components/react/toggle-group";
+import { Toggle } from "@base-ui-components/react/toggle";
+import { Checkbox } from "@base-ui-components/react/checkbox";
+import { Tooltip } from "@base-ui-components/react/tooltip";
 import type { AppRouter } from "@trove/api";
 
 export const trpc = createTRPCClient<AppRouter>({ links: [httpBatchLink({ url: "/api/trpc" })] });
@@ -122,10 +130,40 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-// ── settings flyout ───────────────────────────────────────────────────────
-function Menu() {
+// A small tooltip wrapper for icon buttons. Uses `render` so the trigger is the
+// button itself (no extra wrapper element that would break layout).
+function IconButton({
+  label,
+  className,
+  onClick,
+  children,
+}: {
+  label: string;
+  className?: string;
+  onClick?(): void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <button className={className ?? "iconbtn"} aria-label={label} onClick={onClick}>
+            {children}
+          </button>
+        }
+      />
+      <Tooltip.Portal>
+        <Tooltip.Positioner side="bottom" sideOffset={6}>
+          <Tooltip.Popup className="tt">{label}</Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
+
+// ── settings flyout (Base UI Popover) ───────────────────────────────────────
+function SettingsMenu() {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState(initialTheme());
   const { data } = useQuery({ queryKey: ["status"], queryFn: () => trpc.status.query() });
   const sync = useMutation({ mutationFn: () => trpc.sync.mutate({}), onSuccess: () => qc.invalidateQueries() });
@@ -139,39 +177,44 @@ function Menu() {
   };
   return (
     <div className="menu">
-      <button className="iconbtn" title="menu" onClick={() => setOpen((o) => !o)}>
-        <MenuIcon size={16} />
-      </button>
-      {open && (
-        <>
-          <div className="menu-backdrop" onClick={() => setOpen(false)} />
-          <div className="menu-panel">
-            <div className="st">
-              <span>sessions</span>
-              <b>{data?.totalSessions ?? "—"}</b>
-            </div>
-            <div className="st">
-              <span>messages</span>
-              <b>{data?.totalMessages?.toLocaleString() ?? "—"}</b>
-            </div>
-            {data?.perAgent.map((a) => (
-              <div className="st" key={a.agent}>
-                <span className={`badge ${agentClass(a.agent)}`}>{agentLabel(a.agent)}</span>
-                <b>{a.sessions}</b>
+      <Popover.Root>
+        <Popover.Trigger
+          render={
+            <button className="iconbtn" aria-label="menu">
+              <MenuIcon size={16} />
+            </button>
+          }
+        />
+        <Popover.Portal>
+          <Popover.Positioner side="bottom" align="start" sideOffset={6}>
+            <Popover.Popup className="menu-panel">
+              <div className="st">
+                <span>sessions</span>
+                <b>{data?.totalSessions ?? "—"}</b>
               </div>
-            ))}
-            <hr />
-            <div className="mrow">
-              <button className="btn" disabled={sync.isPending} onClick={() => sync.mutate()}>
-                <RefreshCw size={13} /> {sync.isPending ? "syncing…" : "sync"}
-              </button>
-              <button className="btn" onClick={toggleTheme}>
-                {theme === "light" ? <Moon size={13} /> : <Sun size={13} />} {theme === "light" ? "dark" : "light"}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+              <div className="st">
+                <span>messages</span>
+                <b>{data?.totalMessages?.toLocaleString() ?? "—"}</b>
+              </div>
+              {data?.perAgent.map((a) => (
+                <div className="st" key={a.agent}>
+                  <span className={`badge ${agentClass(a.agent)}`}>{agentLabel(a.agent)}</span>
+                  <b>{a.sessions}</b>
+                </div>
+              ))}
+              <hr />
+              <div className="mrow">
+                <button className="btn" disabled={sync.isPending} onClick={() => sync.mutate()}>
+                  <RefreshCw size={13} /> {sync.isPending ? "syncing…" : "sync"}
+                </button>
+                <button className="btn" onClick={toggleTheme}>
+                  {theme === "light" ? <Moon size={13} /> : <Sun size={13} />} {theme === "light" ? "dark" : "light"}
+                </button>
+              </div>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   );
 }
@@ -179,7 +222,7 @@ function Menu() {
 function Header({ query, setQuery }: { query: string; setQuery(v: string): void }) {
   return (
     <header className="header">
-      <Menu />
+      <SettingsMenu />
       <div className="brand">
         trove<span className="dot">.</span>
       </div>
@@ -389,23 +432,27 @@ function Sidebar(props: {
         {searching && (
           <div className="controls">
             <span className="lbl">sort</span>
-            <div className="seg">
-              <button className={sort === "relevance" ? "on" : ""} onClick={() => setSort("relevance")}>
-                Best match
-              </button>
-              <button className={sort === "recent" ? "on" : ""} onClick={() => setSort("recent")}>
-                Recent
-              </button>
-            </div>
+            <ToggleGroup
+              className="seg"
+              value={[sort]}
+              onValueChange={(v) => {
+                if (v[0]) setSort(v[0] as "relevance" | "recent");
+              }}
+            >
+              <Toggle value="relevance">Best match</Toggle>
+              <Toggle value="recent">Recent</Toggle>
+            </ToggleGroup>
             <span className="lbl">view</span>
-            <div className="seg">
-              <button className={view === "sessions" ? "on" : ""} onClick={() => setView("sessions")}>
-                Conversations
-              </button>
-              <button className={view === "messages" ? "on" : ""} onClick={() => setView("messages")}>
-                Messages
-              </button>
-            </div>
+            <ToggleGroup
+              className="seg"
+              value={[view]}
+              onValueChange={(v) => {
+                if (v[0]) setView(v[0] as "sessions" | "messages");
+              }}
+            >
+              <Toggle value="sessions">Conversations</Toggle>
+              <Toggle value="messages">Messages</Toggle>
+            </ToggleGroup>
           </div>
         )}
       </div>
@@ -532,38 +579,60 @@ const MessageList = memo(function MessageList(props: {
   );
 });
 
-// ── delete modal ──────────────────────────────────────────────────────────
+// ── delete dialog (Base UI Dialog + Checkbox) ────────────────────────────────
 function ConfirmDelete({
   name,
-  onCancel,
+  open,
+  onOpenChange,
   onConfirm,
 }: {
   name: string;
-  onCancel(): void;
+  open: boolean;
+  onOpenChange(open: boolean): void;
   onConfirm(deleteSource: boolean): void;
 }) {
   const [deleteSource, setDeleteSource] = useState(false);
+  // Reset the checkbox each time the dialog opens.
+  useEffect(() => {
+    if (open) setDeleteSource(false);
+  }, [open]);
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Delete conversation?</h3>
-        <p>
-          Remove <b>{name}</b> from trove. It won't come back on the next sync.
-        </p>
-        <label className="modal-check">
-          <input type="checkbox" checked={deleteSource} onChange={(e) => setDeleteSource(e.target.checked)} />
-          Also delete the original session file <span className="warn">(cannot be undone)</span>
-        </label>
-        <div className="modal-actions">
-          <button className="btn" onClick={onCancel}>
-            Cancel
-          </button>
-          <button className="btn danger" onClick={() => onConfirm(deleteSource)}>
-            <Trash2 size={13} /> Delete
-          </button>
-        </div>
-      </div>
-    </div>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="modal-backdrop" />
+        <Dialog.Viewport className="modal-viewport">
+          <Dialog.Popup className="modal">
+            <Dialog.Title render={<h3>Delete conversation?</h3>} />
+            <Dialog.Description
+              render={
+                <p>
+                  Remove <b>{name}</b> from trove. It won't come back on the next sync.
+                </p>
+              }
+            />
+            <Checkbox.Root
+              className="modal-check"
+              render={<label />}
+              checked={deleteSource}
+              onCheckedChange={(v) => setDeleteSource(v)}
+            >
+              <span className="cbx">
+                <Checkbox.Indicator className="cbx-ind">
+                  <Check size={12} />
+                </Checkbox.Indicator>
+              </span>
+              Also delete the original session file <span className="warn">(cannot be undone)</span>
+            </Checkbox.Root>
+            <div className="modal-actions">
+              <Dialog.Close render={<button className="btn">Cancel</button>} />
+              <button className="btn danger" onClick={() => onConfirm(deleteSource)}>
+                <Trash2 size={13} /> Delete
+              </button>
+            </div>
+          </Dialog.Popup>
+        </Dialog.Viewport>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -654,23 +723,27 @@ function DetailHead({
           </>
         )}
         <div className="dh-actions">
-          <button className={`iconbtn${s.starred ? " on" : ""}`} title="star" onClick={() => mStar.mutate(!s.starred)}>
+          <IconButton
+            label="star"
+            className={`iconbtn${s.starred ? " on" : ""}`}
+            onClick={() => mStar.mutate(!s.starred)}
+          >
             <Star size={15} fill={s.starred ? "currentColor" : "none"} />
-          </button>
-          <button className="iconbtn" title="rename" onClick={startEdit}>
+          </IconButton>
+          <IconButton label="rename" onClick={startEdit}>
             <Pencil size={14} />
-          </button>
+          </IconButton>
           {resumeCommand && (
-            <button className="iconbtn" title="copy resume command" onClick={() => copy(resumeCommand, "resume")}>
+            <IconButton label="copy resume command" onClick={() => copy(resumeCommand, "resume")}>
               {copied === "resume" ? <Check size={14} /> : <Copy size={14} />}
-            </button>
+            </IconButton>
           )}
-          <button className="iconbtn" title={expandAll ? "collapse all" : "expand all"} onClick={onToggleExpand}>
+          <IconButton label={expandAll ? "collapse all" : "expand all"} onClick={onToggleExpand}>
             {expandAll ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
-          </button>
-          <button className="iconbtn danger" title="delete" onClick={() => setConfirming(true)}>
+          </IconButton>
+          <IconButton label="delete" className="iconbtn danger" onClick={() => setConfirming(true)}>
             <Trash2 size={14} />
-          </button>
+          </IconButton>
         </div>
       </div>
       <div className="dh-meta">
@@ -694,16 +767,15 @@ function DetailHead({
           {copied === "id" ? " ✓" : ""}
         </span>
       </div>
-      {confirming && (
-        <ConfirmDelete
-          name={s.name}
-          onCancel={() => setConfirming(false)}
-          onConfirm={(deleteSource) => {
-            setConfirming(false);
-            mDelete.mutate(deleteSource);
-          }}
-        />
-      )}
+      <ConfirmDelete
+        name={s.name}
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={(deleteSource) => {
+          setConfirming(false);
+          mDelete.mutate(deleteSource);
+        }}
+      />
     </div>
   );
 }
@@ -804,7 +876,9 @@ function App() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <Tooltip.Provider delay={400}>
+        <App />
+      </Tooltip.Provider>
     </QueryClientProvider>
   </StrictMode>,
 );
