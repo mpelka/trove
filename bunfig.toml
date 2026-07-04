@@ -1,0 +1,6 @@
+# Enable Tailwind CSS v4 processing for Bun's HTML bundler (the trove web GUI).
+# bun-plugin-tailwind resolves `@import "tailwindcss"` in packages/web/src/styles.css
+# when Bun.serve bundles index.html. Applies to the static dev server used by
+# `bun run packages/web/src/server.ts`.
+[serve.static]
+plugins = ["bun-plugin-tailwind"]
