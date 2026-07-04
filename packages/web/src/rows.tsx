@@ -2,10 +2,6 @@ import { Star, Asterisk, Sparkle, Bot } from "lucide-react";
 import { Badge } from "@cloudflare/kumo";
 import { fmtRel, agentClass, agentLabel, projLabel } from "./lib.ts";
 
-// Kumo Badge tint per agent (keeps the visual distinction from the hand-rolled version).
-export const agentBadgeVariant = (a: string) =>
-  a === "claude-code" ? "orange" : a === "gemini-cli" ? "blue" : "neutral";
-
 export function Snippet({ text }: { text: string }) {
   const parts = text.split(/«([^»]*)»/);
   return <>{parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : <span key={i}>{p}</span>))}</>;
