@@ -23,6 +23,10 @@ import {
   RefreshCw,
   Moon,
   Sun,
+  Asterisk,
+  Sparkles,
+  Bot,
+  CornerDownRight,
 } from "lucide-react";
 // Cloudflare Kumo (v2.6): styled, accessible components built on Base UI + Tailwind v4.
 // Kumo's design tokens theme the app; the interactive bits use Kumo primitives.
@@ -138,12 +142,18 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-// Agent badge, styled via Kumo's Badge with per-agent color variants.
+// Agent marker: a small round, tinted logo per agent. Generic glyphs (not the official
+// trademarked logos): claude=asterisk-spark, gemini=sparkles, copilot=bot.
+const AgentIcon = ({ agent }: { agent: string }) =>
+  agent === "claude-code" ? <Asterisk size={12} strokeWidth={2.5} />
+  : agent === "gemini-cli" ? <Sparkles size={12} strokeWidth={2.2} />
+  : <Bot size={12} strokeWidth={2.2} />;
+
 function AgentBadge({ agent }: { agent: string }) {
   return (
-    <Badge variant={agentBadgeVariant(agent) as any} className="agentbadge">
-      {agentLabel(agent)}
-    </Badge>
+    <span className={`agentlogo ${agentClass(agent)}`} title={agent} aria-label={agentLabel(agent)}>
+      <AgentIcon agent={agent} />
+    </span>
   );
 }
 
@@ -369,6 +379,12 @@ function Sidebar(props: {
       }),
     enabled: searching,
   });
+  // If the query looks like an id (short id, uuid, message #), offer a direct jump.
+  const idHit = useQuery({
+    queryKey: ["resolveId", query],
+    queryFn: () => trpc.resolveId.query({ q: query }),
+    enabled: searching,
+  }).data;
 
   const star = useMutation({
     mutationFn: (v: { id: string; starred: boolean }) => trpc.setStar.mutate(v),
@@ -483,8 +499,24 @@ function Sidebar(props: {
         )}
       </div>
       <div className="list">
+        {idHit && (
+          <div
+            className="row idrow"
+            onClick={() => onSelect({ id: idHit.sessionId, msgId: idHit.messageId })}
+          >
+            <div className="top">
+              <CornerDownRight size={14} />
+              <span className="name">
+                open {idHit.kind} · {shortId(idHit.sessionId)}
+                {idHit.messageId != null ? ` · msg #${idHit.messageId}` : ""}
+              </span>
+            </div>
+          </div>
+        )}
         {loading && <div className="loading">searching…</div>}
-        {!loading && count === 0 && <div className="loading">{searching ? "No matches." : "No sessions."}</div>}
+        {!loading && count === 0 && !idHit && (
+          <div className="loading">{searching ? "No matches." : "No sessions."}</div>
+        )}
         {body}
       </div>
     </div>

@@ -4,6 +4,7 @@ import {
   listSessions,
   status,
   getSessionDetail,
+  lookupId,
   searchSessions,
   searchMessages,
   sync,
@@ -61,6 +62,10 @@ export const appRouter = router({
       hits: searchSessions(ctx.trove.db, { ...input, groupBySession: true }),
     };
   }),
+
+  resolveId: publicProcedure
+    .input(z.object({ q: z.string() }))
+    .query(({ ctx, input }) => lookupId(ctx.trove.db, input.q)),
 
   sessionDetail: publicProcedure.input(idInput).query(({ ctx, input }) => {
     const detail = getSessionDetail(ctx.trove.db, input.id);

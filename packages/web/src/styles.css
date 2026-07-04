@@ -100,6 +100,23 @@ body {
 
 .count-pill { color: var(--accent); font-family: var(--mono); font-size: 11px; }
 
+/* agent marker: small round tinted logo */
+.agentlogo { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; flex: none; color: #fff; }
+.agentlogo svg { display: block; }
+.agentlogo.cc { background: oklch(58% 0.15 45); }
+.agentlogo.gemini { background: oklch(55% 0.13 250); }
+.agentlogo:not(.cc):not(.gemini) { background: var(--dim-2); }
+
+/* filter bar floats above the list with a soft bottom shadow */
+.sidebar-top { box-shadow: 0 5px 7px -6px rgba(0, 0, 0, 0.22); position: relative; z-index: 2; }
+
+/* id-jump row */
+.row.idrow { background: var(--accent-soft); }
+.row.idrow .name, .row.idrow svg { color: var(--accent); font-weight: 600; }
+
+/* user turns as a faux chat bubble so they stand out from assistant/tool */
+.msg.user { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 12px; padding: 8px 14px 10px; margin: 6px 0 6px 28px; }
+
 /* highlight marks (search «...» + in-body rehype) */
 mark {
   background: light-dark(oklch(90% 0.15 90), oklch(78% 0.14 85));

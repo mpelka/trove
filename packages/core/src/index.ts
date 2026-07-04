@@ -17,6 +17,8 @@ export {
   listSessions,
   status,
   getSessionDetail,
+  lookupId,
+  type IdHit,
   type ListOptions,
   type SessionListItem,
   type StatusReport,

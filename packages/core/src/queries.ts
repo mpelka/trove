@@ -152,6 +152,49 @@ export interface SessionDetail {
   messages: MessageRow[];
 }
 
+export interface IdHit {
+  sessionId: string;
+  messageId: number | null;
+  kind: "session" | "message";
+}
+
+/**
+ * If the query looks like an id, resolve it to a jump target: a numeric message rowid,
+ * a full namespaced session id, a short id (`cc·7de4…`), a message uuid, or a unique
+ * native-id prefix. Returns null when the query isn't an id (fall back to text search).
+ */
+export function lookupId(db: Database, raw: string): IdHit | null {
+  const q = raw.trim();
+  if (q.length < 4) return null;
+
+  if (/^\d+$/.test(q)) {
+    const row = db.query("SELECT id, session_id FROM messages WHERE id = ?").get(Number(q)) as
+      | { id: number; session_id: string }
+      | undefined;
+    return row ? { sessionId: row.session_id, messageId: row.id, kind: "message" } : null;
+  }
+
+  const exact = db.query("SELECT id FROM sessions WHERE id = ?").get(q) as { id: string } | undefined;
+  if (exact) return { sessionId: exact.id, messageId: null, kind: "session" };
+
+  // strip a short-id agent prefix: "cc·7de4", "gem:abc", "claude-code:uuid"
+  const m = q.match(/^(?:cc|gem|claude-code|gemini-cli)[·:](.+)$/i);
+  const core = m ? m[1] : q;
+
+  const byUid = db.query("SELECT id, session_id FROM messages WHERE uid = ?").get(core) as
+    | { id: number; session_id: string }
+    | undefined;
+  if (byUid) return { sessionId: byUid.session_id, messageId: byUid.id, kind: "message" };
+
+  if (core.length >= 6) {
+    const rows = db
+      .query("SELECT id FROM sessions WHERE native_id = ? OR native_id LIKE ? LIMIT 2")
+      .all(core, `${core}%`) as { id: string }[];
+    if (rows.length === 1) return { sessionId: rows[0].id, messageId: null, kind: "session" };
+  }
+  return null;
+}
+
 export function getSessionDetail(db: Database, id: string): SessionDetail | null {
   const s = db
     .query(
