@@ -7,7 +7,11 @@ export { fmtRel, fmtSize, agentLabel, projLabel, shortId } from "@trove/core/for
 
 /** Web-only: CSS class per agent (colors the round agent logo). */
 export const agentClass = (a: string) =>
-  a === "claude-code" ? "cc" : a === "gemini-cli" ? "gemini" : "";
+  a === "claude-code" ? "cc"
+  : a === "gemini-cli" ? "gemini"
+  : a === "copilot" ? "copilot"
+  : a === "antigravity" ? "agy"
+  : "";
 
 export function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

@@ -178,8 +178,8 @@ export function lookupId(db: Database, raw: string): IdHit | null {
   const exact = db.query("SELECT id FROM sessions WHERE id = ?").get(q) as { id: string } | undefined;
   if (exact) return { sessionId: exact.id, messageId: null, kind: "session" };
 
-  // strip a short-id agent prefix: "cc·7de4", "gem:abc", "claude-code:uuid"
-  const m = q.match(/^(?:cc|gem|claude-code|gemini-cli)[·:](.+)$/i);
+  // strip a short-id agent prefix: "cc·7de4", "gem:abc", "cop·…", "agy·…", full agent ids
+  const m = q.match(/^(?:cc|gem|cop|agy|claude-code|gemini-cli|copilot|antigravity)[·:](.+)$/i);
   const core = m ? m[1] : q;
 
   const byUid = db.query("SELECT id, session_id FROM messages WHERE uid = ?").get(core) as

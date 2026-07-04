@@ -119,6 +119,24 @@ describe("moved source file (same content, new path)", () => {
   });
 });
 
+describe("source gone → reappears unchanged", () => {
+  it("clears source_gone even though the fast gate skips the upsert", async () => {
+    const srcs: FakeSource[] = [{ path: "/p/s.json", nativeId: "back", text: "still here" }];
+    let visible = true;
+    const adapter = fakeAdapter(() => (visible ? srcs : []));
+
+    await sync(db, [adapter], {});
+    visible = false;
+    await sync(db, [adapter], {}); // vanishes → marked gone
+    expect(count("SELECT COUNT(*) n FROM sessions WHERE source_gone = 1")).toBe(1);
+
+    visible = true; // reappears, byte-identical (same size + mtime → fast gate)
+    const r = await sync(db, [adapter], {});
+    expect(r.unchanged).toBe(1);
+    expect(count("SELECT COUNT(*) n FROM sessions WHERE source_gone = 1")).toBe(0);
+  });
+});
+
 describe("tombstone by id", () => {
   it("a deleted session stays deleted even after its source file moves", async () => {
     const srcs: FakeSource[] = [{ path: "/p1/s.json", nativeId: "del", text: "secret stuff" }];

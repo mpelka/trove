@@ -56,7 +56,7 @@ export async function sync(
   };
 
   const getByPath = db.query(
-    "SELECT id, size_bytes, source_mtime FROM sessions WHERE source_path = ?",
+    "SELECT id, size_bytes, source_mtime, source_gone FROM sessions WHERE source_path = ?",
   );
   const insertSession = db.query(INSERT_SESSION_SQL);
   const deleteMessages = db.query("DELETE FROM messages WHERE session_id = ?");
@@ -87,7 +87,7 @@ export async function sync(
       if (tombstoned.has(ref.path)) continue; // user deleted it — respect that
       seenPaths.add(ref.path);
       const existing = getByPath.get(ref.path) as
-        | { id: string; size_bytes: number | null; source_mtime: number | null }
+        | { id: string; size_bytes: number | null; source_mtime: number | null; source_gone: number }
         | undefined;
 
       // Fast gate: unchanged size + mtime → skip (CC/gemini files grow on every edit).
@@ -97,6 +97,11 @@ export async function sync(
         existing.source_mtime === ref.mtimeMs
       ) {
         seenIds.add(existing.id); // register so a duplicate path can't clobber this id
+        if (existing.source_gone) {
+          // Source vanished earlier but reappeared unchanged — clear the flag here,
+          // since the fast gate skips the upsert that would normally reset it.
+          db.query("UPDATE sessions SET source_gone = 0 WHERE id = ?").run(existing.id);
+        }
         result.unchanged++;
         continue;
       }

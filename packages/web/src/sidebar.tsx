@@ -128,6 +128,12 @@ export function Sidebar(props: {
           <button className={`chip${agent === "gemini-cli" ? " on" : ""}`} onClick={() => setAgent("gemini-cli")}>
             gemini
           </button>
+          <button className={`chip${agent === "copilot" ? " on" : ""}`} onClick={() => setAgent("copilot")}>
+            copilot
+          </button>
+          <button className={`chip${agent === "antigravity" ? " on" : ""}`} onClick={() => setAgent("antigravity")}>
+            agy
+          </button>
           <button className={`chip star${starOnly ? " on" : ""}`} onClick={() => setStarOnly((v) => !v)}>
             <Star size={12} fill={starOnly ? "currentColor" : "none"} /> starred
           </button>

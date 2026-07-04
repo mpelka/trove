@@ -47,10 +47,14 @@ describe("agentClass / agentLabel", () => {
   it("maps known agents and falls back for unknown", () => {
     expect(agentClass("claude-code")).toBe("cc");
     expect(agentClass("gemini-cli")).toBe("gemini");
-    expect(agentClass("copilot")).toBe("");
+    expect(agentClass("copilot")).toBe("copilot");
+    expect(agentClass("antigravity")).toBe("agy");
+    expect(agentClass("codex")).toBe(""); // unknown → no class
     expect(agentLabel("claude-code")).toBe("CC");
     expect(agentLabel("gemini-cli")).toBe("GEM");
-    expect(agentLabel("copilot")).toBe("copilot");
+    expect(agentLabel("copilot")).toBe("COP");
+    expect(agentLabel("antigravity")).toBe("AGY");
+    expect(agentLabel("codex")).toBe("codex"); // unknown → passthrough
   });
 });
 
@@ -71,8 +75,12 @@ describe("shortId", () => {
   it("uses the trailing token of gemini session-… native ids", () => {
     expect(shortId("gemini-cli:session-2025-06-01T10-00-abcd1234")).toBe("gem·abcd1234");
   });
+  it("abbreviates copilot/antigravity", () => {
+    expect(shortId("copilot:deadbeefcafe1234")).toBe("cop·deadbeef");
+    expect(shortId("antigravity:0123456789abcdef")).toBe("agy·01234567");
+  });
   it("keeps unknown agents and handles ids without a namespace", () => {
-    expect(shortId("copilot:deadbeefcafe1234")).toBe("copilot·deadbeef");
+    expect(shortId("codex:deadbeefcafe1234")).toBe("codex·deadbeef");
     expect(shortId("deadbeefcafe1234")).toBe("·deadbeef");
   });
 });
