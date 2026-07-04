@@ -1,0 +1,14 @@
+{
+  "name": "trove",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "trove": "bun run packages/cli/src/index.ts",
+    "gui": "bun run packages/web/src/server.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

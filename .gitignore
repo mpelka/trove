@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# trove's own writable data dir (never commit archived sessions — may contain corporate code/secrets)
+.trove/
+*.db
+*.db-wal
+*.db-shm
+
+# scratch
+scratchpad/
+*.log
+
+# os
+.DS_Store
