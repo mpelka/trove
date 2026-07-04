@@ -331,6 +331,37 @@ program
   });
 
 program
+  .command("hook")
+  .description("Print agent hook config that reindexes trove when a session ends")
+  .argument("[what]", "print", "print")
+  .action(() => {
+    const troveBin = `bun run ${new URL("./index.ts", import.meta.url).pathname}`;
+    console.log(c.bold("Claude Code — add to ~/.claude/settings.json under \"hooks\":"));
+    console.log(
+      JSON.stringify(
+        {
+          SessionEnd: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: `${troveBin} sync --agent claude-code >/dev/null 2>&1 &`,
+                },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    console.log();
+    console.log(c.dim("Runs an incremental reindex in the background when a session ends."));
+    console.log(c.dim("Verify the hook event name against your Claude Code version's docs."));
+    console.log(c.dim("gemini-cli / copilot: no post-session hook mechanism pinned yet (issue #5)."));
+  });
+
+program
   .command("delete")
   .description("Delete a session from trove (tombstoned so sync won't re-add it)")
   .argument("<id>")
