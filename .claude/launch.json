@@ -6,6 +6,18 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "packages/web/src/server.ts"],
       "port": 4319
+    },
+    {
+      "name": "trove-baseui",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", ".worktrees/base-ui/packages/web/src/server.ts"],
+      "port": 4319
+    },
+    {
+      "name": "trove-kumo",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", ".worktrees/kumo/packages/web/src/server.ts"],
+      "port": 4319
     }
   ]
 }
