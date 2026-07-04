@@ -13,3 +13,6 @@ scratchpad/
 
 # os
 .DS_Store
+
+# UI-library trial worktrees
+.worktrees/
