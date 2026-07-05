@@ -30,6 +30,15 @@ try {
   if (saved) document.documentElement.style.setProperty("--sidebar-w", saved);
 } catch {}
 
+// restore the reader settings (conversation width + line-spacing) before first paint,
+// same pattern as the sidebar width above — these drive --msg-width / --msg-line on .messages/.md
+try {
+  const w = localStorage.getItem("trove-msg-width");
+  if (w) document.documentElement.style.setProperty("--msg-width", w);
+  const l = localStorage.getItem("trove-msg-line");
+  if (l) document.documentElement.style.setProperty("--msg-line", l);
+} catch {}
+
 /** Drag handle between the panes: drag sets --sidebar-w (persisted), double-click resets. */
 function Divider() {
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
