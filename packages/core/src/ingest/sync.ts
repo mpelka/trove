@@ -1,8 +1,11 @@
 import type { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { eq } from "drizzle-orm";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { archiveDir } from "../paths.ts";
 import { setKv } from "../db/client.ts";
+import { sessions, messages, sessionMeta } from "../db/drizzle-schema.ts";
 import { tombstonedPaths, tombstonedIds } from "../curate.ts";
 import type { Adapter } from "../adapters/types.ts";
 
@@ -20,21 +23,6 @@ export interface SyncResult {
   gone: number;
   perAgent: Record<string, { sessions: number; messages: number }>;
 }
-
-const INSERT_SESSION_SQL = `
-INSERT INTO sessions
-  (id, agent, native_id, source_path, source_medium, project_path, created_at, updated_at,
-   size_bytes, turn_count, message_count, model, source_title, kind, agent_specific, raw_path,
-   content_hash, source_mtime, imported_at, source_gone)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-ON CONFLICT(id) DO UPDATE SET
-  agent=excluded.agent, native_id=excluded.native_id, source_path=excluded.source_path,
-  source_medium=excluded.source_medium, project_path=excluded.project_path,
-  created_at=excluded.created_at, updated_at=excluded.updated_at, size_bytes=excluded.size_bytes,
-  turn_count=excluded.turn_count, message_count=excluded.message_count, model=excluded.model,
-  source_title=excluded.source_title, kind=excluded.kind, agent_specific=excluded.agent_specific,
-  raw_path=excluded.raw_path, content_hash=excluded.content_hash, source_mtime=excluded.source_mtime,
-  source_gone=0`;
 
 function sanitize(s: string): string {
   return s.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -55,19 +43,17 @@ export async function sync(
     perAgent: {},
   };
 
+  const d = drizzle(db);
   const getByPath = db.query(
     "SELECT id, size_bytes, source_mtime, source_gone FROM sessions WHERE source_path = ?",
   );
-  const insertSession = db.query(INSERT_SESSION_SQL);
-  const deleteMessages = db.query("DELETE FROM messages WHERE session_id = ?");
-  const insertMessage = db.query(
-    "INSERT INTO messages (uid, session_id, seq, role, parent_uid, timestamp, text) VALUES (?,?,?,?,?,?,?)",
-  );
-  const ensureMeta = db.query("INSERT OR IGNORE INTO session_meta (session_id) VALUES (?)");
   const getById = db.query("SELECT source_path, content_hash FROM sessions WHERE id = ?");
-  const updateSourceMeta = db.query(
-    "UPDATE sessions SET source_path = ?, source_mtime = ?, size_bytes = ?, source_gone = 0 WHERE id = ?",
-  );
+  const updateSourceMeta = (path: string, mtime: number | null, size: number | null, id: string) =>
+    d
+      .update(sessions)
+      .set({ sourcePath: path, sourceMtime: mtime, sizeBytes: size, sourceGone: 0 })
+      .where(eq(sessions.id, id))
+      .run();
   const tombstoned = tombstonedPaths(db); // user-deleted sources — never re-import
   const tombstonedById = tombstonedIds(db); // …even if the file moved to a new path
   const seenIds = new Set<string>(); // guard: two live sources claiming one session id
@@ -100,7 +86,7 @@ export async function sync(
         if (existing.source_gone) {
           // Source vanished earlier but reappeared unchanged — clear the flag here,
           // since the fast gate skips the upsert that would normally reset it.
-          db.query("UPDATE sessions SET source_gone = 0 WHERE id = ?").run(existing.id);
+          d.update(sessions).set({ sourceGone: 0 }).where(eq(sessions.id, existing.id)).run();
         }
         result.unchanged++;
         continue;
@@ -158,7 +144,7 @@ export async function sync(
         // the fast gate and the file re-parses forever. Changed content falls through
         // to a normal update (which also rewrites source_path via the upsert).
         if (existingById.content_hash === parsed.contentHash) {
-          updateSourceMeta.run(ref.path, ref.mtimeMs, ref.sizeBytes, id);
+          updateSourceMeta(ref.path, ref.mtimeMs, ref.sizeBytes, id);
           seenIds.add(id);
           result.unchanged++;
           continue;
@@ -166,7 +152,7 @@ export async function sync(
       } else if (existingById && existingById.content_hash === parsed.contentHash) {
         // Same path, same content, but mtime/size drifted (e.g. touch): refresh
         // metadata so the fast gate works next run; no message rewrite.
-        updateSourceMeta.run(ref.path, ref.mtimeMs, ref.sizeBytes, id);
+        updateSourceMeta(ref.path, ref.mtimeMs, ref.sizeBytes, id);
         seenIds.add(id);
         result.unchanged++;
         continue;
@@ -180,41 +166,51 @@ export async function sync(
       }
 
       const now = Date.now();
+      // Fields written on both insert and conflict-update. imported_at is INTENTIONALLY
+      // omitted from the update set (the original row's import time is preserved), and
+      // source_gone is reset to 0 on both paths.
+      const common = {
+        agent: adapter.agentId,
+        nativeId: s.nativeId,
+        sourcePath: ref.path,
+        sourceMedium: ref.medium,
+        projectPath: s.projectPath ?? null,
+        createdAt: s.createdAt ?? null,
+        updatedAt: s.updatedAt ?? null,
+        sizeBytes: ref.sizeBytes,
+        turnCount,
+        messageCount: s.messages.length,
+        model: s.model ?? null,
+        sourceTitle: derivedTitle,
+        kind: s.kind ?? null,
+        agentSpecific: s.agentSpecific ? JSON.stringify(s.agentSpecific) : null,
+        rawPath,
+        contentHash: parsed.contentHash,
+        sourceMtime: ref.mtimeMs,
+        sourceGone: 0,
+      };
       const tx = db.transaction(() => {
-        deleteMessages.run(id);
-        insertSession.run(
-          id,
-          adapter.agentId,
-          s.nativeId,
-          ref.path,
-          ref.medium,
-          s.projectPath ?? null,
-          s.createdAt ?? null,
-          s.updatedAt ?? null,
-          ref.sizeBytes,
-          turnCount,
-          s.messages.length,
-          s.model ?? null,
-          derivedTitle,
-          s.kind ?? null,
-          s.agentSpecific ? JSON.stringify(s.agentSpecific) : null,
-          rawPath,
-          parsed.contentHash,
-          ref.mtimeMs,
-          now,
-        );
-        for (const m of s.messages) {
-          insertMessage.run(
-            m.uid ?? null,
-            id,
-            m.seq,
-            m.role,
-            m.parentUid ?? null,
-            m.timestamp ?? null,
-            m.text,
-          );
+        d.delete(messages).where(eq(messages.sessionId, id)).run();
+        d.insert(sessions)
+          .values({ id, importedAt: now, ...common })
+          .onConflictDoUpdate({ target: sessions.id, set: common })
+          .run();
+        if (s.messages.length > 0) {
+          d.insert(messages)
+            .values(
+              s.messages.map((m) => ({
+                uid: m.uid ?? null,
+                sessionId: id,
+                seq: m.seq,
+                role: m.role,
+                parentUid: m.parentUid ?? null,
+                timestamp: m.timestamp ?? null,
+                text: m.text,
+              })),
+            )
+            .run();
         }
-        ensureMeta.run(id);
+        d.insert(sessionMeta).values({ sessionId: id }).onConflictDoNothing().run();
       });
       tx();
 
@@ -228,10 +224,9 @@ export async function sync(
     const live = db
       .query("SELECT id, source_path FROM sessions WHERE agent = ? AND source_gone = 0")
       .all(adapter.agentId) as { id: string; source_path: string }[];
-    const markGone = db.query("UPDATE sessions SET source_gone = 1 WHERE id = ?");
     for (const row of live) {
       if (!seenPaths.has(row.source_path)) {
-        markGone.run(row.id);
+        d.update(sessions).set({ sourceGone: 1 }).where(eq(sessions.id, row.id)).run();
         result.gone++;
       }
     }

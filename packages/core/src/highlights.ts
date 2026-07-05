@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { and, eq, sql, desc, asc } from "drizzle-orm";
+import { highlights, sessions, sessionMeta, messages } from "./db/drizzle-schema.ts";
 
 /**
  * Readwise-style highlights. A highlight is user-owned data (like names/stars): it lives in
@@ -51,24 +54,25 @@ export interface SessionHighlight {
 export function addHighlight(db: Database, input: AddHighlightInput): number {
   const text = input.text;
   if (!text || !text.trim()) throw new Error("highlight text is required");
-  const info = db
-    .query(
-      `INSERT INTO highlights (session_id, message_uid, message_seq, text, note, created_at)
-       VALUES (?,?,?,?,?,?)`,
-    )
-    .run(
-      input.sessionId,
-      input.messageUid ?? null,
-      input.messageSeq ?? null,
+  const d = drizzle(db);
+  const [row] = d
+    .insert(highlights)
+    .values({
+      sessionId: input.sessionId,
+      messageUid: input.messageUid ?? null,
+      messageSeq: input.messageSeq ?? null,
       text,
-      input.note ?? null,
-      Date.now(),
-    );
-  return Number(info.lastInsertRowid);
+      note: input.note ?? null,
+      createdAt: Date.now(),
+    })
+    .returning({ id: highlights.id })
+    .all();
+  return Number(row.id);
 }
 
 export function removeHighlight(db: Database, id: number): void {
-  db.query("DELETE FROM highlights WHERE id = ?").run(id);
+  const d = drizzle(db);
+  d.delete(highlights).where(eq(highlights.id, id)).run();
 }
 
 /** Resolve the current message rowid for a highlight: uid first, else (session, seq). */
@@ -78,16 +82,21 @@ function resolveMessageId(
   uid: string | null,
   seq: number | null,
 ): number | null {
+  const d = drizzle(db);
   if (uid) {
-    const byUid = db
-      .query("SELECT id FROM messages WHERE session_id = ? AND uid = ?")
-      .get(sessionId, uid) as { id: number } | undefined;
+    const byUid = d
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.uid, uid)))
+      .get();
     if (byUid) return byUid.id;
   }
   if (seq != null) {
-    const bySeq = db
-      .query("SELECT id FROM messages WHERE session_id = ? AND seq = ?")
-      .get(sessionId, seq) as { id: number } | undefined;
+    const bySeq = d
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.seq, seq)))
+      .get();
     if (bySeq) return bySeq.id;
   }
   return null;
@@ -100,28 +109,26 @@ export interface ListHighlightsOptions {
 
 /** Highlights joined with session name/agent, newest first, each with a resolved rowid. */
 export function listHighlights(db: Database, opts: ListHighlightsOptions = {}): Highlight[] {
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (opts.sessionId) {
-    where.push("h.session_id = ?");
-    params.push(opts.sessionId);
-  }
-  params.push(opts.limit ?? 200);
-  const rows = db
-    .query(
-      `SELECT h.id AS id, h.session_id AS sessionId, h.message_uid AS messageUid,
-              h.message_seq AS messageSeq, h.text AS text, h.note AS note,
-              h.created_at AS createdAt,
-              COALESCE(meta.custom_name, s.source_title, s.native_id, h.session_id) AS sessionName,
-              COALESCE(s.agent, '') AS agent
-       FROM highlights h
-       LEFT JOIN sessions s ON s.id = h.session_id
-       LEFT JOIN session_meta meta ON meta.session_id = h.session_id
-       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-       ORDER BY h.created_at DESC, h.id DESC
-       LIMIT ?`,
-    )
-    .all(...(params as any[])) as Omit<Highlight, "messageId">[];
+  const d = drizzle(db);
+  const rows = d
+    .select({
+      id: highlights.id,
+      sessionId: highlights.sessionId,
+      messageUid: highlights.messageUid,
+      messageSeq: highlights.messageSeq,
+      text: highlights.text,
+      note: highlights.note,
+      createdAt: highlights.createdAt,
+      sessionName: sql<string>`COALESCE(${sessionMeta.customName}, ${sessions.sourceTitle}, ${sessions.nativeId}, ${highlights.sessionId})`,
+      agent: sql<string>`COALESCE(${sessions.agent}, '')`,
+    })
+    .from(highlights)
+    .leftJoin(sessions, eq(sessions.id, highlights.sessionId))
+    .leftJoin(sessionMeta, eq(sessionMeta.sessionId, highlights.sessionId))
+    .where(opts.sessionId ? eq(highlights.sessionId, opts.sessionId) : undefined)
+    .orderBy(desc(highlights.createdAt), desc(highlights.id))
+    .limit(opts.limit ?? 200)
+    .all();
   return rows.map((r) => ({
     ...r,
     messageId: resolveMessageId(db, r.sessionId, r.messageUid, r.messageSeq),
@@ -130,11 +137,18 @@ export function listHighlights(db: Database, opts: ListHighlightsOptions = {}): 
 
 /** Highlights for one session, for the GUI to mark messages in one pass. */
 export function highlightsForSession(db: Database, sessionId: string): SessionHighlight[] {
-  return db
-    .query(
-      `SELECT id, message_uid AS messageUid, message_seq AS messageSeq, text, note,
-              created_at AS createdAt
-       FROM highlights WHERE session_id = ? ORDER BY id ASC`,
-    )
-    .all(sessionId) as SessionHighlight[];
+  const d = drizzle(db);
+  return d
+    .select({
+      id: highlights.id,
+      messageUid: highlights.messageUid,
+      messageSeq: highlights.messageSeq,
+      text: highlights.text,
+      note: highlights.note,
+      createdAt: highlights.createdAt,
+    })
+    .from(highlights)
+    .where(eq(highlights.sessionId, sessionId))
+    .orderBy(asc(highlights.id))
+    .all();
 }

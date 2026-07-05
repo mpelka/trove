@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { eq, isNotNull } from "drizzle-orm";
 import { unlinkSync } from "node:fs";
+import { sessions, messages, sessionMeta, highlights, summaries, tombstones } from "./db/drizzle-schema.ts";
 
 export interface DeleteResult {
   ok: boolean;
@@ -17,11 +20,16 @@ export function deleteSession(
   id: string,
   opts: { deleteSource?: boolean } = {},
 ): DeleteResult {
-  const row = db
-    .query("SELECT source_path, source_medium, raw_path FROM sessions WHERE id = ?")
-    .get(id) as
-    | { source_path: string; source_medium: string; raw_path: string | null }
-    | undefined;
+  const d = drizzle(db);
+  const row = d
+    .select({
+      source_path: sessions.sourcePath,
+      source_medium: sessions.sourceMedium,
+      raw_path: sessions.rawPath,
+    })
+    .from(sessions)
+    .where(eq(sessions.id, id))
+    .get();
   if (!row) return { ok: false, sourceDeleted: false };
 
   let sourceDeleted = false;
@@ -42,16 +50,18 @@ export function deleteSession(
   }
 
   const tx = db.transaction(() => {
-    db.query("INSERT OR REPLACE INTO tombstones (source_path, id, deleted_at) VALUES (?,?,?)").run(
-      row.source_path,
-      id,
-      Date.now(),
-    );
-    db.query("DELETE FROM messages WHERE session_id = ?").run(id);
-    db.query("DELETE FROM session_meta WHERE session_id = ?").run(id);
-    db.query("DELETE FROM highlights WHERE session_id = ?").run(id);
-    db.query("DELETE FROM summaries WHERE session_id = ?").run(id);
-    db.query("DELETE FROM sessions WHERE id = ?").run(id);
+    d.insert(tombstones)
+      .values({ sourcePath: row.source_path, id, deletedAt: Date.now() })
+      .onConflictDoUpdate({
+        target: tombstones.sourcePath,
+        set: { id, deletedAt: Date.now() },
+      })
+      .run();
+    d.delete(messages).where(eq(messages.sessionId, id)).run();
+    d.delete(sessionMeta).where(eq(sessionMeta.sessionId, id)).run();
+    d.delete(highlights).where(eq(highlights.sessionId, id)).run();
+    d.delete(summaries).where(eq(summaries.sessionId, id)).run();
+    d.delete(sessions).where(eq(sessions.id, id)).run();
   });
   tx();
   return { ok: true, sourceDeleted };
@@ -59,15 +69,19 @@ export function deleteSession(
 
 /** Source paths the user has deleted; sync consults this to avoid re-importing them. */
 export function tombstonedPaths(db: Database): Set<string> {
-  const rows = db.query("SELECT source_path FROM tombstones").all() as { source_path: string }[];
+  const d = drizzle(db);
+  const rows = d.select({ source_path: tombstones.sourcePath }).from(tombstones).all();
   return new Set(rows.map((r) => r.source_path));
 }
 
 /** Stable session ids the user has deleted. Checked in addition to paths so a
  *  moved/renamed source file (e.g. a renamed project dir) can't resurrect a session. */
 export function tombstonedIds(db: Database): Set<string> {
-  const rows = db.query("SELECT id FROM tombstones WHERE id IS NOT NULL").all() as {
-    id: string;
-  }[];
-  return new Set(rows.map((r) => r.id));
+  const d = drizzle(db);
+  const rows = d
+    .select({ id: tombstones.id })
+    .from(tombstones)
+    .where(isNotNull(tombstones.id))
+    .all();
+  return new Set(rows.map((r) => r.id as string));
 }

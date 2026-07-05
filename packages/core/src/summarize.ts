@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { eq } from "drizzle-orm";
+import { summaries } from "./db/drizzle-schema.ts";
 import { exportSession } from "./export.ts";
 import { summarizerCommand } from "./config.ts";
 
@@ -26,21 +29,31 @@ export type SummarizeResult =
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 export function getSummary(db: Database, id: string): Summary | null {
-  const row = db
-    .query("SELECT session_id AS sessionId, text, created_at AS createdAt FROM summaries WHERE session_id = ?")
-    .get(id) as Summary | undefined;
+  const d = drizzle(db);
+  const row = d
+    .select({
+      sessionId: summaries.sessionId,
+      text: summaries.text,
+      createdAt: summaries.createdAt,
+    })
+    .from(summaries)
+    .where(eq(summaries.sessionId, id))
+    .get();
   return row ?? null;
 }
 
 export function removeSummary(db: Database, id: string): void {
-  db.query("DELETE FROM summaries WHERE session_id = ?").run(id);
+  const d = drizzle(db);
+  d.delete(summaries).where(eq(summaries.sessionId, id)).run();
 }
 
 function upsertSummary(db: Database, id: string, text: string): Summary {
   const createdAt = Date.now();
-  db.query(
-    "INSERT OR REPLACE INTO summaries (session_id, text, created_at) VALUES (?,?,?)",
-  ).run(id, text, createdAt);
+  const d = drizzle(db);
+  d.insert(summaries)
+    .values({ sessionId: id, text, createdAt })
+    .onConflictDoUpdate({ target: summaries.sessionId, set: { text, createdAt } })
+    .run();
   return { sessionId: id, text, createdAt };
 }
 

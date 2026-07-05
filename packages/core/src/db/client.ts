@@ -1,5 +1,8 @@
 import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { eq } from "drizzle-orm";
 import { SCHEMA_SQL } from "./schema.ts";
+import { kv } from "./drizzle-schema.ts";
 
 /**
  * Open (creating if needed) the trove SQLite store with WAL + a busy_timeout so a
@@ -16,12 +19,19 @@ export function openDb(path: string): Database {
 }
 
 export function getKv(db: Database, key: string): string | null {
-  const row = db.query("SELECT value FROM kv WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
+  const d = drizzle(db);
+  const row = d
+    .select({ value: kv.value })
+    .from(kv)
+    .where(eq(kv.key, key))
+    .get();
   return row?.value ?? null;
 }
 
 export function setKv(db: Database, key: string, value: string): void {
-  db.query("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)").run(key, value);
+  const d = drizzle(db);
+  d.insert(kv)
+    .values({ key, value })
+    .onConflictDoUpdate({ target: kv.key, set: { value } })
+    .run();
 }

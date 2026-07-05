@@ -1,8 +1,11 @@
 import type { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { and, eq, sql, like, asc, type SQL } from "drizzle-orm";
 import { statSync } from "node:fs";
 import { getKv } from "./db/client.ts";
 import { dbPath } from "./paths.ts";
 import type { MessageRow } from "./db/schema.ts";
+import { sessions, messages, sessionMeta } from "./db/drizzle-schema.ts";
 import { highlightsForSession, type SessionHighlight } from "./highlights.ts";
 import { getSummary, type Summary } from "./summarize.ts";
 
@@ -33,45 +36,50 @@ export interface SessionListItem {
 }
 
 export function listSessions(db: Database, opts: ListOptions = {}): SessionListItem[] {
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (opts.agent) {
-    where.push("s.agent = ?");
-    params.push(opts.agent);
-  }
-  if (opts.star) where.push("COALESCE(meta.starred, 0) = 1");
-  if (!opts.includeHidden) where.push("COALESCE(meta.hidden, 0) = 0");
-  if (opts.project) {
-    where.push("s.project_path LIKE ?");
-    params.push(`%${opts.project}%`);
-  }
-  if (opts.tag) {
-    where.push("meta.tags LIKE ?");
-    params.push(`%"${opts.tag}"%`);
-  }
-  const field =
-    opts.sort === "created"
-      ? "s.created_at"
-      : opts.sort === "name"
-        ? "name COLLATE NOCASE"
-        : opts.sort === "turns"
-          ? "s.turn_count"
-          : "s.updated_at";
+  const d = drizzle(db);
+  const nameExpr = sql`COALESCE(${sessionMeta.customName}, ${sessions.sourceTitle}, ${sessions.nativeId})`;
+
+  const conds: SQL[] = [];
+  if (opts.agent) conds.push(eq(sessions.agent, opts.agent));
+  if (opts.star) conds.push(sql`COALESCE(${sessionMeta.starred}, 0) = 1`);
+  if (!opts.includeHidden) conds.push(sql`COALESCE(${sessionMeta.hidden}, 0) = 0`);
+  if (opts.project) conds.push(like(sessions.projectPath, `%${opts.project}%`));
+  if (opts.tag) conds.push(like(sessionMeta.tags, `%"${opts.tag}"%`));
+
   const dir = opts.order ?? (opts.sort === "name" ? "asc" : "desc");
-  const orderBy = `${field} ${dir === "asc" ? "ASC" : "DESC"}`;
-  const sql = `
-    SELECT s.id AS id, s.agent AS agent,
-      COALESCE(meta.custom_name, s.source_title, s.native_id) AS name,
-      s.project_path AS projectPath, s.turn_count AS turnCount, s.message_count AS messageCount,
-      s.size_bytes AS sizeBytes, s.created_at AS createdAt, s.updated_at AS updatedAt,
-      COALESCE(meta.starred, 0) AS starred, meta.tags AS tags, s.source_gone AS sourceGone
-    FROM sessions s
-    LEFT JOIN session_meta meta ON meta.session_id = s.id
-    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-    ORDER BY ${orderBy}
-    LIMIT ?`;
-  params.push(opts.limit ?? 50);
-  const rows = db.query(sql).all(...(params as any[])) as any[];
+  const asc = dir === "asc";
+  const orderExpr =
+    opts.sort === "created"
+      ? sql`${sessions.createdAt}`
+      : opts.sort === "name"
+        ? sql`${nameExpr} COLLATE NOCASE`
+        : opts.sort === "turns"
+          ? sql`${sessions.turnCount}`
+          : sql`${sessions.updatedAt}`;
+  const orderBy = asc ? sql`${orderExpr} ASC` : sql`${orderExpr} DESC`;
+
+  const rows = d
+    .select({
+      id: sessions.id,
+      agent: sessions.agent,
+      name: nameExpr.mapWith(String),
+      projectPath: sessions.projectPath,
+      turnCount: sessions.turnCount,
+      messageCount: sessions.messageCount,
+      sizeBytes: sessions.sizeBytes,
+      createdAt: sessions.createdAt,
+      updatedAt: sessions.updatedAt,
+      starred: sql<number>`COALESCE(${sessionMeta.starred}, 0)`,
+      tags: sessionMeta.tags,
+      sourceGone: sessions.sourceGone,
+    })
+    .from(sessions)
+    .leftJoin(sessionMeta, eq(sessionMeta.sessionId, sessions.id))
+    .where(conds.length ? and(...conds) : undefined)
+    .orderBy(orderBy)
+    .limit(opts.limit ?? 50)
+    .all();
+
   return rows.map((r) => ({
     id: r.id,
     agent: r.agent,
@@ -99,23 +107,33 @@ export interface StatusReport {
 }
 
 export function status(db: Database): StatusReport {
+  const d = drizzle(db);
   const totalSessions =
-    (db.query("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n ?? 0;
+    d.select({ n: sql<number>`COUNT(*)` }).from(sessions).get()?.n ?? 0;
   const totalMessages =
-    (db.query("SELECT COUNT(*) AS n FROM messages").get() as { n: number }).n ?? 0;
+    d.select({ n: sql<number>`COUNT(*)` }).from(messages).get()?.n ?? 0;
   const starred =
-    (db.query("SELECT COUNT(*) AS n FROM session_meta WHERE starred = 1").get() as { n: number })
-      .n ?? 0;
+    d
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(sessionMeta)
+      .where(eq(sessionMeta.starred, 1))
+      .get()?.n ?? 0;
   const gone =
-    (db.query("SELECT COUNT(*) AS n FROM sessions WHERE source_gone = 1").get() as { n: number })
-      .n ?? 0;
-  const perAgent = db
-    .query(
-      `SELECT s.agent AS agent, COUNT(*) AS sessions,
-              COALESCE(SUM(s.message_count), 0) AS messages
-       FROM sessions s GROUP BY s.agent ORDER BY sessions DESC`,
-    )
-    .all() as { agent: string; sessions: number; messages: number }[];
+    d
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(sessions)
+      .where(eq(sessions.sourceGone, 1))
+      .get()?.n ?? 0;
+  const perAgent = d
+    .select({
+      agent: sessions.agent,
+      sessions: sql<number>`COUNT(*)`.as("sessions"),
+      messages: sql<number>`COALESCE(SUM(${sessions.messageCount}), 0)`,
+    })
+    .from(sessions)
+    .groupBy(sessions.agent)
+    .orderBy(sql`sessions DESC`)
+    .all();
   const lastSyncRaw = getKv(db, "last_sync");
   let dbSizeBytes: number | null = null;
   try {
@@ -171,52 +189,90 @@ export interface IdHit {
  * native-id prefix. Returns null when the query isn't an id (fall back to text search).
  */
 export function lookupId(db: Database, raw: string): IdHit | null {
+  const d = drizzle(db);
   const q = raw.trim();
 
   // Numeric = message rowid; checked before the length gate so short ids (1–999) work.
   if (/^\d+$/.test(q)) {
-    const row = db.query("SELECT id, session_id FROM messages WHERE id = ?").get(Number(q)) as
-      | { id: number; session_id: string }
-      | undefined;
+    const row = d
+      .select({ id: messages.id, session_id: messages.sessionId })
+      .from(messages)
+      .where(eq(messages.id, Number(q)))
+      .get();
     return row ? { sessionId: row.session_id, messageId: row.id, kind: "message" } : null;
   }
   if (q.length < 4) return null;
 
-  const exact = db.query("SELECT id FROM sessions WHERE id = ?").get(q) as { id: string } | undefined;
+  const exact = d.select({ id: sessions.id }).from(sessions).where(eq(sessions.id, q)).get();
   if (exact) return { sessionId: exact.id, messageId: null, kind: "session" };
 
   // strip a short-id agent prefix: "cc·7de4", "gem:abc", "cop·…", "agy·…", full agent ids
   const m = q.match(/^(?:cc|gem|cop|agy|claude-code|gemini-cli|copilot|antigravity)[·:](.+)$/i);
   const core = m ? m[1] : q;
 
-  const byUid = db.query("SELECT id, session_id FROM messages WHERE uid = ?").get(core) as
-    | { id: number; session_id: string }
-    | undefined;
+  const byUid = d
+    .select({ id: messages.id, session_id: messages.sessionId })
+    .from(messages)
+    .where(eq(messages.uid, core))
+    .get();
   if (byUid) return { sessionId: byUid.session_id, messageId: byUid.id, kind: "message" };
 
   if (core.length >= 6) {
-    const rows = db
-      .query("SELECT id FROM sessions WHERE native_id = ? OR native_id LIKE ? LIMIT 2")
-      .all(core, `${core}%`) as { id: string }[];
+    const rows = d
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(sql`${sessions.nativeId} = ${core} OR ${sessions.nativeId} LIKE ${`${core}%`}`)
+      .limit(2)
+      .all();
     if (rows.length === 1) return { sessionId: rows[0].id, messageId: null, kind: "session" };
   }
   return null;
 }
 
 export function getSessionDetail(db: Database, id: string): SessionDetail | null {
-  const s = db
-    .query(
-      `SELECT s.*, COALESCE(meta.custom_name, s.source_title, s.native_id) AS name,
-              meta.custom_name AS custom_name,
-              COALESCE(meta.starred,0) AS starred, meta.tags AS tags, meta.notes AS notes
-       FROM sessions s LEFT JOIN session_meta meta ON meta.session_id = s.id
-       WHERE s.id = ?`,
-    )
-    .get(id) as any;
+  const d = drizzle(db);
+  const s = d
+    .select({
+      id: sessions.id,
+      agent: sessions.agent,
+      native_id: sessions.nativeId,
+      project_path: sessions.projectPath,
+      model: sessions.model,
+      created_at: sessions.createdAt,
+      updated_at: sessions.updatedAt,
+      turn_count: sessions.turnCount,
+      message_count: sessions.messageCount,
+      size_bytes: sessions.sizeBytes,
+      source_gone: sessions.sourceGone,
+      raw_path: sessions.rawPath,
+      name: sql<string>`COALESCE(${sessionMeta.customName}, ${sessions.sourceTitle}, ${sessions.nativeId})`,
+      custom_name: sessionMeta.customName,
+      starred: sql<number>`COALESCE(${sessionMeta.starred}, 0)`,
+      tags: sessionMeta.tags,
+      notes: sessionMeta.notes,
+    })
+    .from(sessions)
+    .leftJoin(sessionMeta, eq(sessionMeta.sessionId, sessions.id))
+    .where(eq(sessions.id, id))
+    .get();
   if (!s) return null;
-  const messages = db
-    .query("SELECT * FROM messages WHERE session_id = ? ORDER BY seq ASC")
-    .all(id) as MessageRow[];
+  // Select with explicit snake_case aliases so the returned rows match MessageRow
+  // (and the raw `SELECT *` shape the tests assert) exactly.
+  const msgs = d
+    .select({
+      id: messages.id,
+      uid: messages.uid,
+      session_id: messages.sessionId,
+      seq: messages.seq,
+      role: messages.role,
+      parent_uid: messages.parentUid,
+      timestamp: messages.timestamp,
+      text: messages.text,
+    })
+    .from(messages)
+    .where(eq(messages.sessionId, id))
+    .orderBy(asc(messages.seq))
+    .all() as unknown as MessageRow[];
   return {
     session: {
       id: s.id,
@@ -237,7 +293,7 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
       notes: s.notes,
       rawPath: s.raw_path,
     },
-    messages,
+    messages: msgs,
     highlights: highlightsForSession(db, id),
     summary: getSummary(db, id),
   };

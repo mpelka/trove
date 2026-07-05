@@ -8,5 +8,7 @@
     "./adapters": "./src/adapters/index.ts",
     "./format": "./src/format.ts"
   },
-  "dependencies": {}
+  "dependencies": {
+    "drizzle-orm": "^0.45.2"
+  }
 }
