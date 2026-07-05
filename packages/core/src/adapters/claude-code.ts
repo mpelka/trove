@@ -75,6 +75,14 @@ function isSyntheticUser(text: string): boolean {
   return SYNTHETIC_PREFIXES.some((p) => t.startsWith(p));
 }
 
+/** Compaction continuations arrive as `type:"user"` entries but are harness-written
+ *  summaries, not the human talking. Kept (they're useful context) as role "system". */
+function isCompactionSummary(text: string): boolean {
+  return text
+    .trimStart()
+    .startsWith("This session is being continued from a previous conversation");
+}
+
 export const claudeCodeAdapter: Adapter = {
   agentId: "claude-code",
 
@@ -161,9 +169,11 @@ export const claudeCodeAdapter: Adapter = {
           ? extracted.hasProse
             ? "assistant"
             : "tool"
-          : extracted.hasProse
-            ? "user"
-            : "tool";
+          : isCompactionSummary(extracted.text)
+            ? "system" // harness-written summary — never attribute to the human
+            : extracted.hasProse
+              ? "user"
+              : "tool";
 
       const ts = typeof obj.timestamp === "string" ? Date.parse(obj.timestamp) : NaN;
       if (!Number.isNaN(ts)) {

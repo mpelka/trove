@@ -24,6 +24,50 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+// restore the user's sidebar width before first paint
+try {
+  const saved = localStorage.getItem("trove-sidebar-w");
+  if (saved) document.documentElement.style.setProperty("--sidebar-w", saved);
+} catch {}
+
+/** Drag handle between the panes: drag sets --sidebar-w (persisted), double-click resets. */
+function Divider() {
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.classList.add("dragging");
+    const move = (ev: PointerEvent) => {
+      const w = Math.min(820, Math.max(320, ev.clientX));
+      document.documentElement.style.setProperty("--sidebar-w", `${w}px`);
+    };
+    const up = () => {
+      el.classList.remove("dragging");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const v = document.documentElement.style.getPropertyValue("--sidebar-w");
+      try {
+        if (v) localStorage.setItem("trove-sidebar-w", v);
+      } catch {}
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const reset = () => {
+    document.documentElement.style.removeProperty("--sidebar-w");
+    try {
+      localStorage.removeItem("trove-sidebar-w");
+    } catch {}
+  };
+  return (
+    <div
+      className="divider"
+      title="drag to resize — double-click to reset"
+      onPointerDown={onPointerDown}
+      onDoubleClick={reset}
+    />
+  );
+}
+
 function App() {
   // ALL view state lives in the URL (nuqs): shareable, back-button friendly, and a
   // session link (?s=…&m=…) deep-links straight to a conversation/message.
@@ -80,6 +124,7 @@ function App() {
           selected={selected}
           onSelect={select}
         />
+        <Divider />
         <Detail
           key={selId ?? "none"}
           id={selId}

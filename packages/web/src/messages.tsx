@@ -25,7 +25,7 @@ const ChatMessage = memo(function ChatMessage(props: {
     <div className={`msg ${role}`} id={`msg-${id}`}>
       <div className="who">
         <span className="dot" />
-        {role === "user" ? "you" : "assistant"}
+        {role === "user" ? "you" : role === "system" ? "summary" : "assistant"}
         <span className="t">{fmtRel(ts)}</span>
       </div>
       <div className={`clampwrap${long && !open ? " clamped" : ""}`}>
