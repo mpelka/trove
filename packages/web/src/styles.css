@@ -204,14 +204,15 @@ mark {
    which our sticky chrome (.sidebar-top z:2, .detail-head z:1) painted over —
    tooltips looked "cut off" and the flyout slid under the filter chips. */
 div:has(> .menu-panel),
-div:has(> .tip) { z-index: 60; }
+body > div > div:has(.tipin) { z-index: 60; }
 .menu-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
 }
-/* our tooltips (Kumo Tooltip className="tip"): black, white text, above everything */
-.tip {
+/* our tooltips: the popup is the direct parent of the .tipin content span —
+   black, white text, above everything (both themes) */
+div:has(> .tipin) {
   background: #23272f !important;
   color: #fff !important;
   border: none !important;

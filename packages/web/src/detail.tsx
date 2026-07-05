@@ -35,10 +35,11 @@ function IconButton({
   children: ReactNode;
 }) {
   return (
+    // NOTE: Tooltip's own className would merge onto the RENDER element (the button),
+    // so the popup is tagged via a span in `content` and styled through :has().
     <Tooltip
-      content={label}
+      content={<span className="tipin">{label}</span>}
       side="bottom"
-      className="tip"
       render={
         <button className={className ?? "iconbtn"} aria-label={label} onClick={onClick}>
           {children}
