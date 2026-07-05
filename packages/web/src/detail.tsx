@@ -372,9 +372,12 @@ type PendingSelection = {
 function useHighlightSelection(rootRef: React.RefObject<HTMLDivElement | null>) {
   const [pending, setPending] = useState<PendingSelection | null>(null);
   useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
+    // Read rootRef.current LAZILY inside the handler — the messages pane mounts after
+    // the loading state, and this effect's deps never change, so capturing root at
+    // setup would leave the listeners permanently pointed at null.
     const check = () => {
+      const root = rootRef.current;
+      if (!root) return void setPending(null);
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) return void setPending(null);
       const text = sel.toString().trim();
@@ -394,12 +397,14 @@ function useHighlightSelection(rootRef: React.RefObject<HTMLDivElement | null>) 
         messageSeq: Number(msg.getAttribute("data-seq")),
       });
     };
+    const onScroll = () => setPending(null);
     document.addEventListener("selectionchange", check);
     document.addEventListener("mouseup", check);
-    document.addEventListener("scroll", () => setPending(null), true);
+    document.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("selectionchange", check);
       document.removeEventListener("mouseup", check);
+      document.removeEventListener("scroll", onScroll, true);
     };
   }, [rootRef]);
   return { pending, clear: () => setPending(null) };
