@@ -9,12 +9,20 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Highlighter,
+  Sparkles,
+  RefreshCw,
+  X,
+  ChevronRight,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Dialog, Tooltip, Checkbox, Button, Badge } from "@cloudflare/kumo";
 import { trpc } from "./trpc.ts";
 import { fmtRel, projLabel, shortId } from "./lib.ts";
 import { AgentBadge } from "./rows.tsx";
 import { MessageList } from "./messages.tsx";
+
+const mdComponents = { a: (props: any) => <a {...props} target="_blank" rel="noopener noreferrer" /> };
 
 async function copyText(t: string) {
   try {
@@ -96,10 +104,58 @@ function ConfirmDelete({
   );
 }
 
+// ── ghostwriter summary card (issue #17) ─────────────────────────────────────
+function SummaryCard({
+  summary,
+  onRefresh,
+  onRemove,
+  refreshing,
+}: {
+  summary: { text: string; createdAt: number };
+  onRefresh(): void;
+  onRemove(): void;
+  refreshing: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <div className="ghost-card">
+      <div className="ghost-head">
+        <button
+          className="ghost-toggle"
+          onClick={() => setCollapsed((v) => !v)}
+          aria-label={collapsed ? "expand summary" : "collapse summary"}
+        >
+          <ChevronRight size={13} className={collapsed ? "" : "open"} />
+          <Sparkles size={13} />
+          <span className="ghost-label">ghostwriter summary</span>
+        </button>
+        <span className="ghost-time">{fmtRel(summary.createdAt)}</span>
+        <span className="ghost-actions">
+          <IconButton label="re-summarize" className="ghost-btn" onClick={onRefresh}>
+            <RefreshCw size={13} className={refreshing ? "spin" : ""} />
+          </IconButton>
+          <IconButton label="remove summary" className="ghost-btn" onClick={onRemove}>
+            <X size={13} />
+          </IconButton>
+        </span>
+      </div>
+      {!collapsed && (
+        <div className="ghost-body md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+            {summary.text}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── detail head (owns the typing-heavy state, isolated from MessageList) ─────
 function DetailHead({
   session,
   resumeCommand,
+  summary,
+  summarizerAvailable,
   expandAll,
   onToggleExpand,
   onDeleted,
@@ -107,6 +163,8 @@ function DetailHead({
 }: {
   session: any;
   resumeCommand: string | null;
+  summary: { text: string; createdAt: number } | null;
+  summarizerAvailable: boolean;
   expandAll: boolean;
   onToggleExpand(): void;
   onDeleted(): void;
@@ -118,12 +176,32 @@ function DetailHead({
   const [draft, setDraft] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["detail", s.id] });
     qc.invalidateQueries({ queryKey: ["list"] });
     qc.invalidateQueries({ queryKey: ["search"] });
   };
+  const mSummarize = useMutation({
+    mutationFn: (force: boolean) => trpc.summarize.mutate({ id: s.id, force }),
+    onSuccess: (r) => {
+      if (r.ok) {
+        setSummaryError(null);
+        qc.invalidateQueries({ queryKey: ["detail", s.id] });
+      } else {
+        setSummaryError(r.error);
+      }
+    },
+    onError: (e: any) => setSummaryError(e?.message ?? "summarize failed"),
+  });
+  const mRemoveSummary = useMutation({
+    mutationFn: () => trpc.removeSummary.mutate({ id: s.id }),
+    onSuccess: () => {
+      setSummaryError(null);
+      qc.invalidateQueries({ queryKey: ["detail", s.id] });
+    },
+  });
   const mName = useMutation({
     mutationFn: (name: string | null) => trpc.setName.mutate({ id: s.id, name }),
     onSuccess: invalidate,
@@ -204,6 +282,15 @@ function DetailHead({
               {copied === "resume" ? <Check size={14} /> : <Copy size={14} />}
             </IconButton>
           )}
+          {summarizerAvailable && (
+            <IconButton
+              label={summary ? "re-summarize" : "summarize"}
+              className={`iconbtn${mSummarize.isPending ? " on" : ""}`}
+              onClick={() => !mSummarize.isPending && mSummarize.mutate(!!summary)}
+            >
+              <Sparkles size={15} className={mSummarize.isPending ? "spin" : ""} />
+            </IconButton>
+          )}
           <IconButton label={expandAll ? "collapse all" : "expand all"} onClick={onToggleExpand}>
             {expandAll ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
           </IconButton>
@@ -248,6 +335,15 @@ function DetailHead({
           {copied === "link" ? " ✓ link copied" : ""}
         </a>
       </div>
+      {summaryError && <div className="ghost-error">{summaryError}</div>}
+      {summary && (
+        <SummaryCard
+          summary={summary}
+          refreshing={mSummarize.isPending}
+          onRefresh={() => !mSummarize.isPending && mSummarize.mutate(true)}
+          onRemove={() => mRemoveSummary.mutate()}
+        />
+      )}
       <ConfirmDelete
         name={s.name}
         open={confirming}
@@ -333,6 +429,11 @@ export function Detail({
     queryFn: () => trpc.sessionDetail.query({ id: id! }),
     enabled: !!id,
   });
+  const { data: summarizerAvailable = false } = useQuery({
+    queryKey: ["summarizerAvailable"],
+    queryFn: () => trpc.summarizerAvailable.query(),
+    staleTime: Infinity,
+  });
 
   const invalidateHl = () => {
     qc.invalidateQueries({ queryKey: ["detail", id] });
@@ -384,6 +485,8 @@ export function Detail({
       <DetailHead
         session={data.session}
         resumeCommand={data.resumeCommand}
+        summary={data.summary}
+        summarizerAvailable={summarizerAvailable}
         expandAll={expandAll}
         onToggleExpand={() => {
           setExpandAll((v) => !v);

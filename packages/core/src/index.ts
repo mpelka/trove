@@ -45,6 +45,15 @@ export {
   type TreeResult,
 } from "./context-tree.ts";
 export { exportSession, type ExportFormat } from "./export.ts";
+export { getConfig, summarizerCommand, configPath, type TroveConfig } from "./config.ts";
+export {
+  summarizeSession,
+  getSummary,
+  removeSummary,
+  type Summary,
+  type SummarizeResult,
+  type SummarizeOptions,
+} from "./summarize.ts";
 export { repoRoot } from "./repo.ts";
 export {
   resolveSessionId,

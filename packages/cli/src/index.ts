@@ -22,6 +22,9 @@ import {
   getTree,
   exportSession,
   listHighlights,
+  summarizeSession,
+  getSummary,
+  removeSummary,
   lookupId,
   repoRoot,
   type TroveContext,
@@ -387,6 +390,52 @@ program
           `  ${c.cyan(shortId(h.sessionId))} ${c.dim(h.sessionName)} ${c.dim(fmtRelative(h.createdAt))}`,
         );
       }
+    } finally {
+      ctx.close();
+    }
+  });
+
+// ── summarize (ghostwriter, issue #17) ────────────────────────────────────────
+program
+  .command("summarize")
+  .description("Summarize a session with your configured summarizer command")
+  .argument("<id>", "session id or prefix")
+  .option("--force", "re-run even if a summary already exists")
+  .option("--show", "just print the existing summary (never run the summarizer)")
+  .option("--remove", "delete the stored summary")
+  .option("--json", "output JSON")
+  .action(async (ref: string, opts) => {
+    const ctx = openContext();
+    try {
+      const id = resolveOrExit(ctx, ref);
+
+      if (opts.remove) {
+        removeSummary(ctx.db, id);
+        return void console.log(c.dim("removed summary for ") + shortId(id));
+      }
+
+      if (opts.show) {
+        const existing = getSummary(ctx.db, id);
+        if (!existing) return void console.log(c.dim("No summary yet — run without --show to create one."));
+        if (opts.json) return void console.log(JSON.stringify(existing, null, 2));
+        return void console.log(existing.text);
+      }
+
+      const r = await summarizeSession(ctx.db, id, { force: opts.force });
+      if (opts.json) return void console.log(JSON.stringify(r, null, 2));
+      if (!r.ok) {
+        console.error(c.red(r.error));
+        if (r.error.includes("no summarizer configured")) {
+          console.error(
+            c.dim(
+              'Add {"summarizer": "…"} to ~/.trove/config.json — a shell command that reads markdown on stdin and writes a summary to stdout.',
+            ),
+          );
+        }
+        process.exitCode = 1;
+        return;
+      }
+      console.log(r.summary.text);
     } finally {
       ctx.close();
     }

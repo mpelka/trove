@@ -4,6 +4,7 @@ import { getKv } from "./db/client.ts";
 import { dbPath } from "./paths.ts";
 import type { MessageRow } from "./db/schema.ts";
 import { highlightsForSession, type SessionHighlight } from "./highlights.ts";
+import { getSummary, type Summary } from "./summarize.ts";
 
 export interface ListOptions {
   agent?: string;
@@ -155,6 +156,7 @@ export interface SessionDetail {
   };
   messages: MessageRow[];
   highlights: SessionHighlight[];
+  summary: Summary | null;
 }
 
 export interface IdHit {
@@ -237,5 +239,6 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
     },
     messages,
     highlights: highlightsForSession(db, id),
+    summary: getSummary(db, id),
   };
 }

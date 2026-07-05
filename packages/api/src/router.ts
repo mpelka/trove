@@ -20,6 +20,9 @@ import {
   addHighlight,
   removeHighlight,
   listHighlights,
+  summarizerCommand,
+  summarizeSession,
+  removeSummary,
 } from "@trove/core";
 import { router, publicProcedure } from "./context.ts";
 
@@ -168,6 +171,24 @@ export const appRouter = router({
         .optional(),
     )
     .query(({ ctx, input }) => listHighlights(ctx.trove.db, input ?? {})),
+
+  // ── ghostwriter (issue #17) ────────────────────────────────────────────────
+  // Whether the GUI should offer the summarize action (a summarizer is configured).
+  summarizerAvailable: publicProcedure.query(() => summarizerCommand() != null),
+
+  summarize: publicProcedure
+    .input(idInput.extend({ force: z.boolean().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const r = await summarizeSession(ctx.trove.db, input.id, { force: input.force });
+      return r.ok
+        ? { ok: true as const, summary: r.summary }
+        : { ok: false as const, error: r.error };
+    }),
+
+  removeSummary: publicProcedure.input(idInput).mutation(({ ctx, input }) => {
+    removeSummary(ctx.trove.db, input.id);
+    return { ok: true as const };
+  }),
 });
 
 export type AppRouter = typeof appRouter;

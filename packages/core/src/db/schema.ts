@@ -56,6 +56,12 @@ export interface HighlightRow {
   created_at: number; // epoch ms
 }
 
+export interface SummaryRow {
+  session_id: string;
+  text: string; // the summarizer's stdout, stored verbatim
+  created_at: number; // epoch ms
+}
+
 /** DDL — single source of truth for the physical schema (incl. FTS5 + triggers). */
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -121,6 +127,15 @@ CREATE TABLE IF NOT EXISTS highlights (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_highlights_session ON highlights(session_id);
+
+-- Ghostwriter summaries (issue #17). One per session; produced by piping the markdown
+-- export through the USER-CONFIGURED summarizer command — trove itself never calls an API.
+-- Sidecar table: sync never touches it; deleteSession cascades it.
+CREATE TABLE IF NOT EXISTS summaries (
+  session_id TEXT PRIMARY KEY,
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 
 -- User curation: a deleted session is tombstoned by source_path so sync won't re-import it.
 CREATE TABLE IF NOT EXISTS tombstones (

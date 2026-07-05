@@ -195,6 +195,22 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 /* short git-style id in the detail meta */
 .sid { font-family: var(--mono); font-size: 11px; color: var(--dim-2); cursor: pointer; }
 
+/* ── ghostwriter summary (issue #17) ──────────────────────────────────────── */
+@keyframes trove-spin { to { transform: rotate(360deg); } }
+.spin { animation: trove-spin 0.9s linear infinite; }
+.ghost-error { margin-top: 8px; color: var(--danger); font-size: 12px; }
+.ghost-card { margin-top: 10px; background: var(--accent-soft); border: 1px solid var(--border-soft); border-radius: 12px; padding: 8px 14px 10px; }
+.ghost-head { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; }
+.ghost-toggle { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 12px; font-weight: 600; }
+.ghost-toggle svg.open { transform: rotate(90deg); }
+.ghost-toggle svg { transition: transform 0.15s; }
+.ghost-label { letter-spacing: 0.01em; }
+.ghost-time { color: var(--dim-2); }
+.ghost-actions { margin-left: auto; display: flex; gap: 4px; }
+.ghost-actions .ghost-btn { width: 24px; height: 24px; border: none; background: transparent; }
+.ghost-actions .ghost-btn:hover { color: var(--text); border: none; }
+.ghost-body { margin-top: 8px; }
+
 /* ── message rows ────────────────────────────────────────────────────────── */
 /* cap prose width for readability on wide screens; centered within the pane */
 .messages { padding: 8px 18px 60px; max-width: 80ch; margin-inline: auto; }

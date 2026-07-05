@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb, type TroveContext } from "@trove/core";
+import { openDb, configPath, type TroveContext } from "@trove/core";
 import { appRouter } from "./router.ts";
 
 let dir: string;
 let trove: TroveContext;
 let caller: ReturnType<typeof appRouter.createCaller>;
+const OLD_TROVE_DIR = process.env.TROVE_DIR;
+
+function writeSummarizer(cmd: string | null) {
+  writeFileSync(configPath(), JSON.stringify(cmd == null ? {} : { summarizer: cmd }));
+}
 
 const CC_ID = "claude-code:11112222-3333-4444-5555-666677778888";
 const GEM_ID = "gemini-cli:session-2025-06-01T10-00-beefbeef";
@@ -30,6 +35,7 @@ function seed(db: TroveContext["db"]) {
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "trove-router-"));
+  process.env.TROVE_DIR = dir; // isolate config.json for the summarizer tests
   const db = openDb(join(dir, "router.db"));
   seed(db);
   trove = { db, adapters: [], close: () => db.close() };
@@ -39,6 +45,8 @@ beforeAll(() => {
 afterAll(() => {
   trove.close();
   rmSync(dir, { recursive: true, force: true });
+  if (OLD_TROVE_DIR === undefined) delete process.env.TROVE_DIR;
+  else process.env.TROVE_DIR = OLD_TROVE_DIR;
 });
 
 describe("appRouter", () => {
@@ -179,6 +187,32 @@ describe("appRouter", () => {
     expect(t!.roots.length).toBe(2);
     expect(t!.roots.map((n) => n.uid)).toEqual(["cc-m1", "cc-m2"]);
     expect(await caller.tree({ id: "nope:missing" })).toBeNull();
+  });
+
+  it("summarizerAvailable reflects config; summarize + removeSummary round-trip via sessionDetail", async () => {
+    // no config yet → unavailable
+    writeSummarizer(null);
+    expect(await caller.summarizerAvailable()).toBe(false);
+    let noConfig = await caller.summarize({ id: CC_ID });
+    expect(noConfig.ok).toBe(false);
+    if (!noConfig.ok) expect(noConfig.error).toContain("no summarizer configured");
+
+    // fake summarizer over the piped markdown
+    writeSummarizer(`sh -c 'echo "SUMMARY:" && head -1'`);
+    expect(await caller.summarizerAvailable()).toBe(true);
+    const r = await caller.summarize({ id: CC_ID });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.summary.text).toContain("SUMMARY:");
+
+    // sessionDetail now carries the summary
+    let d = await caller.sessionDetail({ id: CC_ID });
+    expect(d!.summary).not.toBeNull();
+    expect(d!.summary!.text).toContain("SUMMARY:");
+
+    // remove clears it
+    expect(await caller.removeSummary({ id: CC_ID })).toEqual({ ok: true });
+    d = await caller.sessionDetail({ id: CC_ID });
+    expect(d!.summary).toBeNull();
   });
 
   it("rejects invalid input via zod", async () => {
