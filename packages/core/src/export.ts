@@ -41,6 +41,17 @@ export function exportSession(db: Database, id: string, format: ExportFormat): s
     }
     out.push("");
   }
+
+  if (detail.highlights.length) {
+    out.push("## Highlights");
+    out.push("");
+    for (const h of detail.highlights) {
+      // blockquote each line so multi-line highlights stay a single quote block
+      for (const line of h.text.split("\n")) out.push(`> ${line}`);
+      if (h.note) out.push(`>\n> — ${h.note}`);
+      out.push("");
+    }
+  }
   return out.join("\n").replace(/\n+$/, "\n");
 }
 

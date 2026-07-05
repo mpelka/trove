@@ -4,7 +4,7 @@ export * from "./adapters/index.ts";
 export { fmtRel, fmtSize, agentLabel, projLabel, shortId } from "./format.ts";
 export * from "./paths.ts";
 export { openDb, getKv, setKv } from "./db/client.ts";
-export type { SessionRow, MessageRow, MetaRow } from "./db/schema.ts";
+export type { SessionRow, MessageRow, MetaRow, HighlightRow } from "./db/schema.ts";
 export { openContext, maybeSync, type TroveContext } from "./context.ts";
 export { sync, type SyncOptions, type SyncResult } from "./ingest/sync.ts";
 export {
@@ -26,6 +26,16 @@ export {
   type SessionDetail,
 } from "./queries.ts";
 export { deleteSession, tombstonedPaths, type DeleteResult } from "./curate.ts";
+export {
+  addHighlight,
+  removeHighlight,
+  listHighlights,
+  highlightsForSession,
+  type AddHighlightInput,
+  type Highlight,
+  type SessionHighlight,
+  type ListHighlightsOptions,
+} from "./highlights.ts";
 export {
   getContext,
   getTree,

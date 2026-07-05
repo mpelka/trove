@@ -123,6 +123,43 @@ describe("appRouter", () => {
     expect((await caller.list()).map((s) => s.id)).toEqual([CC_ID]);
   });
 
+  it("addHighlight / highlights / sessionDetail.highlights / removeHighlight round-trip", async () => {
+    const add = await caller.addHighlight({
+      sessionId: CC_ID,
+      messageUid: "cc-m1",
+      messageSeq: 0,
+      text: "refactor the widget",
+      note: "the ask",
+    });
+    expect(add.id).toBeGreaterThan(0);
+
+    // list (all) joins session name + agent + resolved rowid
+    const all = await caller.highlights();
+    expect(all).toHaveLength(1);
+    expect(all[0].text).toBe("refactor the widget");
+    expect(all[0].agent).toBe("claude-code");
+    const ccm1 = (
+      trove.db.query("SELECT id FROM messages WHERE uid = 'cc-m1'").get() as { id: number }
+    ).id;
+    expect(all[0].messageId).toBe(ccm1);
+
+    // per-session filter
+    expect(await caller.highlights({ sessionId: GEM_ID })).toHaveLength(0);
+
+    // sessionDetail carries the same highlights in one round-trip
+    const d = await caller.sessionDetail({ id: CC_ID });
+    expect(d!.highlights).toHaveLength(1);
+    expect(d!.highlights[0].messageUid).toBe("cc-m1");
+
+    await caller.removeHighlight({ id: add.id });
+    expect(await caller.highlights()).toHaveLength(0);
+  });
+
+  it("rejects invalid highlight input via zod", async () => {
+    await expect(caller.addHighlight({ sessionId: CC_ID, text: "" })).rejects.toThrow();
+    await expect(caller.removeHighlight({ id: -1 })).rejects.toThrow();
+  });
+
   it("context returns the target message with surrounding messages", async () => {
     const mid = (
       trove.db.query("SELECT id FROM messages WHERE uid = 'cc-m2'").get() as { id: number }

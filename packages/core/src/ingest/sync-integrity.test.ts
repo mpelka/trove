@@ -8,6 +8,7 @@ import type { Database } from "bun:sqlite";
 import { openDb } from "../db/client.ts";
 import { sync } from "./sync.ts";
 import { deleteSession } from "../curate.ts";
+import { addHighlight, listHighlights } from "../highlights.ts";
 import type { Adapter, SourceRef, ParseResult } from "../adapters/types.ts";
 
 interface FakeSource {
@@ -134,6 +135,65 @@ describe("source gone → reappears unchanged", () => {
     const r = await sync(db, [adapter], {});
     expect(r.unchanged).toBe(1);
     expect(count("SELECT COUNT(*) n FROM sessions WHERE source_gone = 1")).toBe(0);
+  });
+});
+
+describe("re-sync preserves highlights (rowid regeneration)", () => {
+  // A highlight must survive re-sync even though messages are deleted + reinserted
+  // (new rowids). It re-anchors via the stable native uid, or seq as a fallback.
+  function uidAdapter(sources: () => FakeSource[]): Adapter {
+    return {
+      agentId: "fake",
+      discoverLocations: () => [],
+      async enumerate(): Promise<SourceRef[]> {
+        return sources().map((s) => ({
+          agent: "fake",
+          medium: "file" as const,
+          path: s.path,
+          sizeBytes: s.text.length,
+          mtimeMs: s.mtimeMs ?? 1000,
+        }));
+      },
+      async parse(ref: SourceRef): Promise<ParseResult | null> {
+        const src = sources().find((s) => s.path === ref.path)!;
+        const hasher = new Bun.CryptoHasher("sha256");
+        hasher.update(src.text);
+        return {
+          session: {
+            nativeId: src.nativeId,
+            projectPath: "/tmp/proj",
+            createdAt: 1,
+            updatedAt: 2,
+            messages: [
+              { seq: 0, role: "user", text: src.text, uid: "u0", parentUid: null, timestamp: 1 },
+              { seq: 1, role: "assistant", text: "reply " + src.text, uid: "u1", parentUid: null, timestamp: 2 },
+            ],
+          },
+          contentHash: hasher.digest("hex"),
+        };
+      },
+    };
+  }
+
+  it("highlight still lists and re-resolves to the new rowid after content changes", async () => {
+    const srcs: FakeSource[] = [{ path: "/h/s.json", nativeId: "hl", text: "v1", mtimeMs: 1 }];
+    const adapter = uidAdapter(() => srcs);
+    await sync(db, [adapter], {});
+
+    const before = db.query("SELECT id FROM messages WHERE session_id='fake:hl' AND uid='u1'").get() as any;
+    addHighlight(db, { sessionId: "fake:hl", messageUid: "u1", messageSeq: 1, text: "my highlight" });
+
+    // change content → messages deleted + reinserted with fresh rowids
+    srcs[0] = { ...srcs[0], text: "v2", mtimeMs: 2 };
+    await sync(db, [adapter], {});
+    const after = db.query("SELECT id FROM messages WHERE session_id='fake:hl' AND uid='u1'").get() as any;
+    expect(after.id).not.toBe(before.id); // rowid really was regenerated
+
+    const hits = listHighlights(db, { sessionId: "fake:hl" });
+    expect(hits).toHaveLength(1);
+    expect(hits[0].text).toBe("my highlight"); // verbatim text survives untouched
+    expect(hits[0].messageId).toBe(after.id); // re-anchored via uid to the new rowid
+    expect(count("SELECT COUNT(*) n FROM highlights")).toBe(1); // sync never touched the table
   });
 });
 

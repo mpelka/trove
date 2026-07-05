@@ -72,6 +72,30 @@ export function SessionRow(p: {
   );
 }
 
+export function HighlightRow(p: {
+  text: string;
+  note: string | null;
+  name: string;
+  agent: string;
+  ts: number | null;
+  selected: boolean;
+  onSelect(): void;
+}) {
+  return (
+    <div className={`row hlrow${p.selected ? " sel" : ""}`} onClick={p.onSelect}>
+      <div className="hl-quote">{p.text}</div>
+      {p.note && <div className="hl-note">{p.note}</div>}
+      <div className="top">
+        <AgentBadge agent={p.agent} />
+        <span className="name">{p.name || "(untitled)"}</span>
+      </div>
+      <div className="sub">
+        <span>{fmtRel(p.ts)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function MessageRow(p: {
   name: string;
   agent: string;

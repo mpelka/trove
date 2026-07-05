@@ -49,6 +49,7 @@ export function deleteSession(
     );
     db.query("DELETE FROM messages WHERE session_id = ?").run(id);
     db.query("DELETE FROM session_meta WHERE session_id = ?").run(id);
+    db.query("DELETE FROM highlights WHERE session_id = ?").run(id);
     db.query("DELETE FROM sessions WHERE id = ?").run(id);
   });
   tx();

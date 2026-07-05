@@ -143,6 +143,42 @@ mark {
   padding: 0 1px;
 }
 
+/* saved highlights (readwise-style) — a warmer, softer yellow than search marks, so the two
+   are visually distinct. Clickable (removes the highlight on click). */
+mark.hl {
+  background: light-dark(oklch(93% 0.13 95), oklch(62% 0.12 92));
+  color: light-dark(oklch(28% 0.08 75), oklch(96% 0.02 95));
+  box-shadow: inset 0 -1px 0 light-dark(oklch(78% 0.16 92), oklch(72% 0.15 92));
+  cursor: pointer;
+  font-weight: 500;
+}
+mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
+
+/* fallback when a highlight can't be marked inline (markdown split the phrase across nodes):
+   tint the whole message's left edge so it's never invisible. */
+.msg.hl-fallback { border-left: 3px solid light-dark(oklch(72% 0.15 92), oklch(62% 0.13 92)); padding-left: 10px; }
+.msg .hl-glyph { color: light-dark(oklch(62% 0.16 92), oklch(72% 0.15 92)); flex: none; }
+
+/* floating "Highlight" button that follows a text selection in the conversation pane */
+.hl-float {
+  position: fixed; transform: translate(-50%, calc(-100% - 8px)); z-index: 50;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--text); color: var(--bg);
+  border: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 600;
+  cursor: pointer; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+.hl-float:hover { filter: brightness(1.08); }
+.hl-float svg { display: block; }
+
+/* highlights browse rows in the sidebar */
+.hlrow .hl-quote {
+  font-size: 13px; color: var(--text); line-height: 1.4;
+  border-left: 3px solid light-dark(oklch(72% 0.15 92), oklch(62% 0.13 92));
+  padding-left: 8px; margin-bottom: 5px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.hlrow .hl-note { font-size: 12px; color: var(--dim); font-style: italic; margin-bottom: 5px; }
+
 /* ── compact detail head ─────────────────────────────────────────────────── */
 .detail-empty { color: var(--dim-2); padding: 48px; text-align: center; }
 /* min-height keeps the two pane headers' bottom edges aligned (matching .sidebar-top);

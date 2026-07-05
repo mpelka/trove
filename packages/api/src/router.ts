@@ -17,6 +17,9 @@ import {
   setNotes,
   addTags,
   removeTags,
+  addHighlight,
+  removeHighlight,
+  listHighlights,
 } from "@trove/core";
 import { router, publicProcedure } from "./context.ts";
 
@@ -135,6 +138,36 @@ export const appRouter = router({
   removeTags: publicProcedure
     .input(idInput.extend({ tags: z.array(z.string()) }))
     .mutation(({ ctx, input }) => ({ tags: removeTags(ctx.trove.db, input.id, input.tags) })),
+
+  addHighlight: publicProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        messageUid: z.string().nullable().optional(),
+        messageSeq: z.number().int().nonnegative().nullable().optional(),
+        text: z.string().min(1),
+        note: z.string().nullable().optional(),
+      }),
+    )
+    .mutation(({ ctx, input }) => ({ id: addHighlight(ctx.trove.db, input) })),
+
+  removeHighlight: publicProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => {
+      removeHighlight(ctx.trove.db, input.id);
+      return { ok: true as const };
+    }),
+
+  highlights: publicProcedure
+    .input(
+      z
+        .object({
+          sessionId: z.string().optional(),
+          limit: z.number().int().positive().max(500).optional(),
+        })
+        .optional(),
+    )
+    .query(({ ctx, input }) => listHighlights(ctx.trove.db, input ?? {})),
 });
 
 export type AppRouter = typeof appRouter;

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { openDb } from "./db/client.ts";
 import { exportSession } from "./export.ts";
+import { addHighlight } from "./highlights.ts";
 
 let dir: string;
 let db: Database;
@@ -70,6 +71,17 @@ describe("exportSession md", () => {
 
   it("returns null for an unknown id", () => {
     expect(exportSession(db, "nope:missing", "md")).toBeNull();
+  });
+
+  it("appends a ## Highlights section when the session has highlights", () => {
+    expect(exportSession(db, ID, "md")!).not.toContain("## Highlights"); // none yet
+    addHighlight(db, { sessionId: ID, messageUid: "m0", messageSeq: 0, text: "refactor the widget", note: "key idea" });
+    const md = exportSession(db, ID, "md")!;
+    expect(md).toContain("## Highlights");
+    expect(md).toContain("> refactor the widget");
+    expect(md).toContain("— key idea");
+    // the section comes after the transcript
+    expect(md.indexOf("## Assistant")).toBeLessThan(md.indexOf("## Highlights"));
   });
 });
 

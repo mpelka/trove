@@ -21,6 +21,7 @@ import {
   getContext,
   getTree,
   exportSession,
+  listHighlights,
   lookupId,
   repoRoot,
   type TroveContext,
@@ -358,6 +359,33 @@ program
         console.error(c.green("wrote ") + opts.out + c.dim(` (${format})`));
       } else {
         console.log(rendered);
+      }
+    } finally {
+      ctx.close();
+    }
+  });
+
+// ── highlights ──────────────────────────────────────────────────────────────
+program
+  .command("highlights")
+  .description("List saved highlights — all, or for one session")
+  .argument("[id]", "session id or prefix (omit for all)")
+  .option("--json", "output JSON")
+  .action((ref: string | undefined, opts) => {
+    const ctx = openContext();
+    try {
+      const sessionId = ref ? resolveOrExit(ctx, ref) : undefined;
+      const hits = listHighlights(ctx.db, { sessionId, limit: 500 });
+      if (opts.json) return void console.log(JSON.stringify(hits, null, 2));
+      if (!hits.length) return void console.log(c.dim("No highlights."));
+      for (const h of hits) {
+        console.log(
+          `${c.magenta("“" + h.text.replace(/\s+/g, " ").trim() + "”")}`,
+        );
+        if (h.note) console.log("  " + c.dim("— " + h.note));
+        console.log(
+          `  ${c.cyan(shortId(h.sessionId))} ${c.dim(h.sessionName)} ${c.dim(fmtRelative(h.createdAt))}`,
+        );
       }
     } finally {
       ctx.close();

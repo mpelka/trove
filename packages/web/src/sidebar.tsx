@@ -1,10 +1,10 @@
 import { type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Star, CornerDownRight, ArrowDown, ArrowUp, X } from "lucide-react";
+import { Star, CornerDownRight, ArrowDown, ArrowUp, X, Highlighter } from "lucide-react";
 import { Tabs } from "@cloudflare/kumo";
 import { trpc } from "./trpc.ts";
 import { fmtRel, fmtSize, shortId, projLabel } from "./lib.ts";
-import { SessionRow, MessageRow } from "./rows.tsx";
+import { SessionRow, MessageRow, HighlightRow } from "./rows.tsx";
 
 export type Selected = { id: string; msgId: number | null } | null;
 
@@ -24,15 +24,17 @@ export function Sidebar(props: {
   setBsort(v: "updated" | "created"): void;
   order: "desc" | "asc";
   setOrder(v: "desc" | "asc"): void;
+  hlView: boolean;
+  setHlView(v: boolean): void;
   selected: Selected;
   onSelect(s: Selected): void;
 }) {
   const qc = useQueryClient();
   const {
     query, agent, setAgent, project, setProject, starOnly, setStarOnly,
-    sort, setSort, view, setView, bsort, setBsort, order, setOrder, selected, onSelect,
+    sort, setSort, view, setView, bsort, setBsort, order, setOrder, hlView, setHlView, selected, onSelect,
   } = props;
-  const searching = query.trim().length > 0;
+  const searching = query.trim().length > 0 && !hlView;
 
   const listQ = useQuery({
     queryKey: ["list", agent, starOnly, project, bsort, order],
@@ -45,7 +47,7 @@ export function Sidebar(props: {
         sort: bsort,
         order,
       }),
-    enabled: !searching,
+    enabled: !searching && !hlView,
   });
   const searchQ = useQuery({
     queryKey: ["search", query, agent, starOnly, project, sort, view],
@@ -68,6 +70,12 @@ export function Sidebar(props: {
     enabled: searching,
   }).data;
 
+  const hlQ = useQuery({
+    queryKey: ["highlights"],
+    queryFn: () => trpc.highlights.query({ limit: 300 }),
+    enabled: hlView,
+  });
+
   const star = useMutation({
     mutationFn: (v: { id: string; starred: boolean }) => trpc.setStar.mutate(v),
     onSuccess: () => {
@@ -77,11 +85,25 @@ export function Sidebar(props: {
     },
   });
 
-  const loading = searching ? searchQ.isLoading : listQ.isLoading;
+  const loading = hlView ? hlQ.isLoading : searching ? searchQ.isLoading : listQ.isLoading;
   let body: ReactNode = null;
   let count = 0;
 
-  if (searching && searchQ.data?.kind === "messages") {
+  if (hlView && hlQ.data) {
+    count = hlQ.data.length;
+    body = hlQ.data.map((h) => (
+      <HighlightRow
+        key={h.id}
+        text={h.text}
+        note={h.note}
+        name={h.sessionName}
+        agent={h.agent}
+        ts={h.createdAt}
+        selected={selected?.id === h.sessionId && h.messageId != null && selected?.msgId === h.messageId}
+        onSelect={() => onSelect({ id: h.sessionId, msgId: h.messageId })}
+      />
+    ));
+  } else if (searching && searchQ.data?.kind === "messages") {
     const hits = searchQ.data.hits;
     count = hits.length;
     body = hits.map((h) => (
@@ -115,7 +137,7 @@ export function Sidebar(props: {
         onStar={() => star.mutate({ id: h.sessionId, starred: !h.starred })}
       />
     ));
-  } else if (!searching && listQ.data) {
+  } else if (!searching && !hlView && listQ.data) {
     count = listQ.data.length;
     body = listQ.data.map((s) => (
       <SessionRow
@@ -155,6 +177,13 @@ export function Sidebar(props: {
           <button className={`chip star${starOnly ? " on" : ""}`} onClick={() => setStarOnly((v) => !v)}>
             <Star size={12} fill={starOnly ? "currentColor" : "none"} /> starred
           </button>
+          <button
+            className={`chip star${hlView ? " on" : ""}`}
+            title="browse saved highlights"
+            onClick={() => setHlView(!hlView)}
+          >
+            <Highlighter size={12} /> highlights
+          </button>
           {project && (
             <button className="chip on projchip" title={`${project} — click to clear`} onClick={() => setProject(null)}>
               {projLabel(project)} <X size={11} />
@@ -162,7 +191,7 @@ export function Sidebar(props: {
           )}
           <span className="count">{loading ? "…" : count}</span>
         </div>
-        {!searching && (
+        {!searching && !hlView && (
           <div className="controls">
             <span className="lbl">sort</span>
             <Tabs
@@ -216,7 +245,7 @@ export function Sidebar(props: {
         )}
       </div>
       <div className="list">
-        {idHit && (
+        {!hlView && idHit && (
           <a
             className="row idrow"
             href={`?s=${encodeURIComponent(idHit.sessionId)}${idHit.messageId != null ? `&m=${idHit.messageId}` : ""}`}
@@ -234,9 +263,15 @@ export function Sidebar(props: {
             </div>
           </a>
         )}
-        {loading && <div className="loading">searching…</div>}
+        {loading && <div className="loading">{hlView ? "loading highlights…" : "searching…"}</div>}
         {!loading && count === 0 && !idHit && (
-          <div className="loading">{searching ? "No matches." : "No sessions."}</div>
+          <div className="loading">
+            {hlView
+              ? "No highlights yet. Select text in a conversation to save one."
+              : searching
+                ? "No matches."
+                : "No sessions."}
+          </div>
         )}
         {body}
       </div>

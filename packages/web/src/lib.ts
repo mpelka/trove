@@ -44,6 +44,65 @@ export function rehypeHighlight(query: string) {
   };
 }
 
+export interface HL {
+  id: number;
+  text: string;
+}
+
+/**
+ * Second rehype pass that marks saved highlights (distinct from the search-term pass).
+ * For each highlight we do an EXACT, case-sensitive substring match within a single text
+ * node and wrap the match in `<mark class="hl" data-hl-id=…>`.
+ *
+ * Markdown can split a phrase across text nodes (e.g. `**bold** word` → three nodes), so an
+ * exact match on any single node may miss. When that happens the mark simply isn't placed;
+ * the caller detects the miss separately (raw text `.includes`) and falls back to a
+ * message-level tint + glyph so the highlight is never invisible. We only ever mark the FIRST
+ * occurrence per highlight to avoid double-marking repeated phrases.
+ */
+export function rehypeHighlightExact(highlights: HL[]) {
+  return () => (tree: any) => {
+    if (!highlights.length) return;
+    const pending = highlights.filter((h) => h.text.length > 0);
+    const walk = (node: any) => {
+      if (!node.children) return;
+      const out: any[] = [];
+      for (const child of node.children) {
+        if (child.type === "text") {
+          // find the earliest-starting still-pending highlight present in this node
+          let best: { hl: HL; idx: number } | null = null;
+          for (const hl of pending) {
+            const idx = child.value.indexOf(hl.text);
+            if (idx >= 0 && (best === null || idx < best.idx)) best = { hl, idx };
+          }
+          if (best) {
+            const { hl, idx } = best;
+            const before = child.value.slice(0, idx);
+            const mid = child.value.slice(idx, idx + hl.text.length);
+            const after = child.value.slice(idx + hl.text.length);
+            if (before) out.push({ type: "text", value: before });
+            out.push({
+              type: "element",
+              tagName: "mark",
+              properties: { className: ["hl"], "data-hl-id": String(hl.id) },
+              children: [{ type: "text", value: mid }],
+            });
+            if (after) out.push({ type: "text", value: after });
+            pending.splice(pending.indexOf(hl), 1); // mark once
+          } else {
+            out.push(child);
+          }
+        } else {
+          if (child.type === "element") walk(child);
+          out.push(child);
+        }
+      }
+      node.children = out;
+    };
+    walk(tree);
+  };
+}
+
 export function parseUsed(text: string): string[] {
   const m = text.match(/^\[used:\s*(.+)\]$/);
   if (!m) return [text];
@@ -55,11 +114,11 @@ export function summarizeTools(counts: Map<string, number>): string {
 }
 
 export type RenderItem =
-  | { kind: "msg"; id: number; role: string; text: string; ts: number | null }
+  | { kind: "msg"; id: number; uid: string | null; seq: number; role: string; text: string; ts: number | null }
   | { kind: "tools"; id: number; counts: Map<string, number>; ts: number | null };
 
 export function buildItems(
-  messages: { id: number; role: string; text: string; timestamp: number | null }[],
+  messages: { id: number; uid?: string | null; seq?: number; role: string; text: string; timestamp: number | null }[],
 ): RenderItem[] {
   const items: RenderItem[] = [];
   for (const m of messages) {
@@ -75,7 +134,15 @@ export function buildItems(
         items.push({ kind: "tools", id: m.id, counts, ts: m.timestamp });
       }
     } else {
-      items.push({ kind: "msg", id: m.id, role: m.role, text: m.text, ts: m.timestamp });
+      items.push({
+        kind: "msg",
+        id: m.id,
+        uid: m.uid ?? null,
+        seq: m.seq ?? 0,
+        role: m.role,
+        text: m.text,
+        ts: m.timestamp,
+      });
     }
   }
   return items;

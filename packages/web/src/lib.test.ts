@@ -8,6 +8,7 @@ import {
   shortId,
   escapeRegExp,
   rehypeHighlight,
+  rehypeHighlightExact,
   parseUsed,
   summarizeTools,
   buildItems,
@@ -133,6 +134,40 @@ describe("rehypeHighlight", () => {
   });
 });
 
+describe("rehypeHighlightExact", () => {
+  const text = (value: string) => ({ type: "text", value });
+  const el = (tagName: string, children: any[]) => ({ type: "element", tagName, children });
+  const tree = (...children: any[]) => ({ type: "root", children });
+
+  it("wraps an exact case-sensitive match in <mark class=hl> with the highlight id", () => {
+    const t = tree(el("p", [text("keep this passage here")]));
+    rehypeHighlightExact([{ id: 7, text: "this passage" }])()(t);
+    const p = t.children[0] as any;
+    expect(p.children.map((c: any) => c.type)).toEqual(["text", "element", "text"]);
+    const mark = p.children[1];
+    expect(mark.tagName).toBe("mark");
+    expect(mark.properties.className).toEqual(["hl"]);
+    expect(mark.properties["data-hl-id"]).toBe("7");
+    expect(mark.children[0].value).toBe("this passage");
+  });
+
+  it("is case-sensitive and marks each highlight at most once", () => {
+    const t = tree(el("p", [text("Fox fox fox")]));
+    rehypeHighlightExact([{ id: 1, text: "fox" }])()(t);
+    const marks = (t.children[0] as any).children.filter((c: any) => c.tagName === "mark");
+    expect(marks).toHaveLength(1); // only the first lowercase "fox", once
+    expect(marks[0].children[0].value).toBe("fox");
+  });
+
+  it("does not mark when the phrase is split across nodes (fallback territory)", () => {
+    // "bold word" is split: <strong>bold</strong> " word" — no single node contains it
+    const t = tree(el("p", [el("strong", [text("bold")]), text(" word tail")]));
+    rehypeHighlightExact([{ id: 2, text: "bold word" }])()(t);
+    const flat = JSON.stringify(t);
+    expect(flat).not.toContain('"mark"');
+  });
+});
+
 describe("parseUsed", () => {
   it("parses tool markers into names", () => {
     expect(parseUsed("[used: Bash, Read]")).toEqual(["Bash", "Read"]);
@@ -168,8 +203,8 @@ describe("buildItems", () => {
   it("passes plain messages through", () => {
     const items = buildItems([m(1, "user", "hi", 10), m(2, "assistant", "hello", 20)]);
     expect(items).toEqual([
-      { kind: "msg", id: 1, role: "user", text: "hi", ts: 10 },
-      { kind: "msg", id: 2, role: "assistant", text: "hello", ts: 20 },
+      { kind: "msg", id: 1, uid: null, seq: 0, role: "user", text: "hi", ts: 10 },
+      { kind: "msg", id: 2, uid: null, seq: 0, role: "assistant", text: "hello", ts: 20 },
     ]);
   });
 
@@ -195,7 +230,7 @@ describe("buildItems", () => {
       expect(Object.fromEntries(g2.counts)).toEqual({ Edit: 1 });
     }
     // interleaving message breaks the run
-    expect(items[2]).toEqual({ kind: "msg", id: 4, role: "assistant", text: "done", ts: 4 });
+    expect(items[2]).toEqual({ kind: "msg", id: 4, uid: null, seq: 0, role: "assistant", text: "done", ts: 4 });
   });
 
   it("round-trips a collapsed run through summarizeTools", () => {

@@ -91,6 +91,7 @@ function App() {
     "order",
     parseAsStringEnum(["desc", "asc"]).withDefault("desc"),
   );
+  const [hlView, setHlView] = useQueryState("hl", parseAsBoolean.withDefault(false));
   const [selId, setSelId] = useQueryState("s", parseAsString);
   const [selMsg, setSelMsg] = useQueryState("m", parseAsInteger);
   const dq = useDebounced(query, 160);
@@ -121,6 +122,8 @@ function App() {
           setBsort={(v) => setBsort(v)}
           order={order}
           setOrder={(v) => setOrder(v)}
+          hlView={hlView}
+          setHlView={(v) => setHlView(v || null)}
           selected={selected}
           onSelect={select}
         />

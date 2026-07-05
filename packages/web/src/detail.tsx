@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Star,
@@ -8,6 +8,7 @@ import {
   Trash2,
   ChevronsDownUp,
   ChevronsUpDown,
+  Highlighter,
 } from "lucide-react";
 import { Dialog, Tooltip, Checkbox, Button, Badge } from "@cloudflare/kumo";
 import { trpc } from "./trpc.ts";
@@ -260,6 +261,54 @@ function DetailHead({
   );
 }
 
+// ── highlight-on-selection floating button ───────────────────────────────────
+type PendingSelection = {
+  x: number;
+  y: number;
+  text: string;
+  messageUid: string | null;
+  messageSeq: number | null;
+};
+
+/** Watch text selection inside `.messages`; when the user selects text within a single
+ *  `.msg`, surface a floating "Highlight" button anchored above the selection. Selections
+ *  that span multiple messages (or land outside .messages) are ignored. */
+function useHighlightSelection(rootRef: React.RefObject<HTMLDivElement | null>) {
+  const [pending, setPending] = useState<PendingSelection | null>(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const check = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return void setPending(null);
+      const text = sel.toString().trim();
+      if (!text) return void setPending(null);
+      const range = sel.getRangeAt(0);
+      const container = range.commonAncestorContainer;
+      const node = container.nodeType === 1 ? (container as Element) : container.parentElement;
+      const msg = node?.closest?.(".msg");
+      // must be a single .msg inside our messages pane, and a chat message (has data-seq)
+      if (!msg || !root.contains(msg) || !msg.hasAttribute("data-seq")) return void setPending(null);
+      const rect = range.getBoundingClientRect();
+      setPending({
+        x: rect.left + rect.width / 2,
+        y: rect.top,
+        text: sel.toString(), // verbatim, not trimmed — exact source of truth
+        messageUid: msg.getAttribute("data-uid") || null,
+        messageSeq: Number(msg.getAttribute("data-seq")),
+      });
+    };
+    document.addEventListener("selectionchange", check);
+    document.addEventListener("mouseup", check);
+    document.addEventListener("scroll", () => setPending(null), true);
+    return () => {
+      document.removeEventListener("selectionchange", check);
+      document.removeEventListener("mouseup", check);
+    };
+  }, [rootRef]);
+  return { pending, clear: () => setPending(null) };
+}
+
 // ── detail ────────────────────────────────────────────────────────────────
 export function Detail({
   id,
@@ -274,12 +323,33 @@ export function Detail({
   onDeleted(): void;
   onProjectClick(project: string): void;
 }) {
+  const qc = useQueryClient();
   const [expandAll, setExpandAll] = useState(false);
   const [resetTick, setResetTick] = useState(0);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const { pending, clear } = useHighlightSelection(messagesRef);
   const { data, isLoading } = useQuery({
     queryKey: ["detail", id],
     queryFn: () => trpc.sessionDetail.query({ id: id! }),
     enabled: !!id,
+  });
+
+  const invalidateHl = () => {
+    qc.invalidateQueries({ queryKey: ["detail", id] });
+    qc.invalidateQueries({ queryKey: ["highlights"] });
+  };
+  const mAdd = useMutation({
+    mutationFn: (v: { text: string; messageUid: string | null; messageSeq: number | null }) =>
+      trpc.addHighlight.mutate({ sessionId: id!, ...v }),
+    onSuccess: () => {
+      invalidateHl();
+      clear();
+      window.getSelection()?.removeAllRanges();
+    },
+  });
+  const mRemove = useMutation({
+    mutationFn: (hid: number) => trpc.removeHighlight.mutate({ id: hid }),
+    onSuccess: invalidateHl,
   });
 
   useEffect(() => {
@@ -291,6 +361,15 @@ export function Detail({
     const t = setTimeout(() => el.classList.remove("jump"), 1800);
     return () => clearTimeout(t);
   }, [data, targetMsgId]);
+
+  // Clicking an existing highlight mark removes it (discoverable via its remove-cursor).
+  const onMessagesClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const mark = target.closest?.("mark.hl") as HTMLElement | null;
+    if (!mark) return;
+    const hid = Number(mark.getAttribute("data-hl-id"));
+    if (hid && confirm("Remove this highlight?")) mRemove.mutate(hid);
+  };
 
   if (!id) return <div className="detail-empty">Select a session to read it.</div>;
   if (isLoading || !data)
@@ -313,7 +392,32 @@ export function Detail({
         onDeleted={onDeleted}
         onProjectClick={onProjectClick}
       />
-      <MessageList messages={data.messages} highlight={highlight} expandAll={expandAll} resetTick={resetTick} />
+      <div ref={messagesRef} onClick={onMessagesClick} className="messages-scroll">
+        <MessageList
+          messages={data.messages}
+          highlight={highlight}
+          highlights={data.highlights}
+          expandAll={expandAll}
+          resetTick={resetTick}
+        />
+      </div>
+      {pending && (
+        <button
+          className="hl-float"
+          style={{ left: pending.x, top: pending.y }}
+          // mousedown (not click) so the selection isn't cleared before we read it
+          onMouseDown={(e) => {
+            e.preventDefault();
+            mAdd.mutate({
+              text: pending.text,
+              messageUid: pending.messageUid,
+              messageSeq: pending.messageSeq,
+            });
+          }}
+        >
+          <Highlighter size={13} /> Highlight
+        </button>
+      )}
     </div>
   );
 }

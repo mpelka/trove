@@ -46,6 +46,16 @@ export interface MetaRow {
   hidden: number;
 }
 
+export interface HighlightRow {
+  id: number;
+  session_id: string;
+  message_uid: string | null; // native message uuid — survives re-sync
+  message_seq: number | null; // positional fallback when uid is absent/changes
+  text: string; // highlighted passage, verbatim — the source of truth
+  note: string | null;
+  created_at: number; // epoch ms
+}
+
 /** DDL — single source of truth for the physical schema (incl. FTS5 + triggers). */
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS sessions (
@@ -96,6 +106,21 @@ CREATE TABLE IF NOT EXISTS session_meta (
 );
 
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+
+-- User-owned highlights (readwise-style). Sidecar table: sync never touches it.
+-- Anchoring: session_id + native message uid (survives re-sync) + seq (positional
+-- fallback) + the verbatim text, which is the source of truth — a highlight survives
+-- even if the underlying message vanishes.
+CREATE TABLE IF NOT EXISTS highlights (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  message_uid TEXT,
+  message_seq INTEGER,
+  text TEXT NOT NULL,
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_highlights_session ON highlights(session_id);
 
 -- User curation: a deleted session is tombstoned by source_path so sync won't re-import it.
 CREATE TABLE IF NOT EXISTS tombstones (

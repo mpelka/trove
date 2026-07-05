@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import { getKv } from "./db/client.ts";
 import { dbPath } from "./paths.ts";
 import type { MessageRow } from "./db/schema.ts";
+import { highlightsForSession, type SessionHighlight } from "./highlights.ts";
 
 export interface ListOptions {
   agent?: string;
@@ -153,6 +154,7 @@ export interface SessionDetail {
     rawPath: string | null;
   };
   messages: MessageRow[];
+  highlights: SessionHighlight[];
 }
 
 export interface IdHit {
@@ -234,5 +236,6 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
       rawPath: s.raw_path,
     },
     messages,
+    highlights: highlightsForSession(db, id),
   };
 }
