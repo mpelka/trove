@@ -113,25 +113,58 @@ export function summarizeTools(counts: Map<string, number>): string {
   return `[used: ${[...counts.entries()].map(([n, c]) => (c > 1 ? `${c}×${n}` : n)).join(", ")}]`;
 }
 
+export interface ToolCall {
+  name: string;
+  input: string;
+}
+
+/** Parse the `tool_calls` JSON column into an ordered ToolCall[]. Tolerant of null/absent
+ *  (older rows synced before issue #20) and malformed JSON — returns [] rather than throwing. */
+export function parseToolCalls(raw: string | null | undefined): ToolCall[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((c) => c && typeof c.name === "string")
+      .map((c) => ({ name: c.name as string, input: typeof c.input === "string" ? c.input : "" }));
+  } catch {
+    return [];
+  }
+}
+
 export type RenderItem =
   | { kind: "msg"; id: number; uid: string | null; seq: number; role: string; text: string; ts: number | null }
-  | { kind: "tools"; id: number; counts: Map<string, number>; ts: number | null };
+  | { kind: "tools"; id: number; counts: Map<string, number>; calls: ToolCall[]; ts: number | null };
 
 export function buildItems(
-  messages: { id: number; uid?: string | null; seq?: number; role: string; text: string; timestamp: number | null }[],
+  messages: {
+    id: number;
+    uid?: string | null;
+    seq?: number;
+    role: string;
+    text: string;
+    timestamp: number | null;
+    tool_calls?: string | null;
+  }[],
 ): RenderItem[] {
   const items: RenderItem[] = [];
   for (const m of messages) {
     if (m.role === "tool") {
       const names = parseUsed(m.text);
+      // Prefer the structured per-call records; fall back to the deduped names from the
+      // `[used: …]` summary for older rows that predate the tool_calls column.
+      const parsed = parseToolCalls(m.tool_calls);
+      const calls: ToolCall[] = parsed.length ? parsed : names.map((n) => ({ name: n, input: "" }));
       const last = items[items.length - 1];
       if (last && last.kind === "tools") {
         for (const n of names) last.counts.set(n, (last.counts.get(n) ?? 0) + 1);
+        last.calls.push(...calls);
         last.ts = m.timestamp;
       } else {
         const counts = new Map<string, number>();
         for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
-        items.push({ kind: "tools", id: m.id, counts, ts: m.timestamp });
+        items.push({ kind: "tools", id: m.id, counts, calls, ts: m.timestamp });
       }
     } else {
       items.push({

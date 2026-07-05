@@ -13,6 +13,12 @@ export interface SyncOptions {
   agentIds?: string[];
   keepRaw?: boolean;
   onProgress?: (msg: string) => void;
+  /** Re-parse and rewrite every session even when the source is byte-identical. The normal
+   *  gates (unchanged size+mtime, then unchanged content hash) key off the SOURCE bytes, not
+   *  our parser — so after an adapter change (e.g. #20 adding tool-call detail) a plain sync
+   *  won't backfill existing rows. `force` bypasses both gates to reindex the whole store
+   *  against the current adapters. */
+  force?: boolean;
 }
 
 export interface SyncResult {
@@ -77,7 +83,9 @@ export async function sync(
         | undefined;
 
       // Fast gate: unchanged size + mtime → skip (CC/gemini files grow on every edit).
+      // `force` bypasses it so an adapter change can reindex byte-identical sources.
       if (
+        !opts.force &&
         existing &&
         existing.size_bytes === ref.sizeBytes &&
         existing.source_mtime === ref.mtimeMs
@@ -143,13 +151,14 @@ export async function sync(
         // content: update source metadata in place — otherwise the row never matches
         // the fast gate and the file re-parses forever. Changed content falls through
         // to a normal update (which also rewrites source_path via the upsert).
-        if (existingById.content_hash === parsed.contentHash) {
+        // `force` falls through to a full rewrite so the parser change lands.
+        if (!opts.force && existingById.content_hash === parsed.contentHash) {
           updateSourceMeta(ref.path, ref.mtimeMs, ref.sizeBytes, id);
           seenIds.add(id);
           result.unchanged++;
           continue;
         }
-      } else if (existingById && existingById.content_hash === parsed.contentHash) {
+      } else if (!opts.force && existingById && existingById.content_hash === parsed.contentHash) {
         // Same path, same content, but mtime/size drifted (e.g. touch): refresh
         // metadata so the fast gate works next run; no message rewrite.
         updateSourceMeta(ref.path, ref.mtimeMs, ref.sizeBytes, id);
@@ -206,6 +215,8 @@ export async function sync(
                 parentUid: m.parentUid ?? null,
                 timestamp: m.timestamp ?? null,
                 text: m.text,
+                // Compact per-tool_use records as JSON; null for non-tool messages (issue #20).
+                toolCalls: m.toolCalls?.length ? JSON.stringify(m.toolCalls) : null,
               })),
             )
             .run();

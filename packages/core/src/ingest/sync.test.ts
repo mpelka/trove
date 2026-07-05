@@ -150,6 +150,23 @@ describe("sync", () => {
     expect(parseCalls()).toBe(before); // fast gate: parse not called again
   });
 
+  it("force re-parses and rewrites byte-identical sources (adapter-change reindex)", async () => {
+    const { adapter, sources, parseCalls } = makeFake();
+    sources.push(source("fake", "one", [msg(0, "user", "hi")]));
+    await sync(db, [adapter]);
+    const before = parseCalls();
+
+    // Simulate an adapter change: same source bytes (same hash/size/mtime) but the
+    // parser now emits different message text. A plain sync would skip this entirely.
+    sources[0].parsed!.session.messages = [msg(0, "user", "hi (reparsed)")];
+    const r2 = await sync(db, [adapter], { force: true });
+
+    expect(parseCalls()).toBe(before + 1); // force bypasses the fast gate → re-parsed
+    expect(r2.unchanged).toBe(0); // and bypasses the content-hash skip
+    expect(r2.updated).toBe(1);
+    expect(messageTexts("fake:one")).toEqual(["hi (reparsed)"]); // rows rewritten
+  });
+
   it("replaces messages on change but preserves session_meta (star + name survive re-sync)", async () => {
     const { adapter, sources } = makeFake();
     sources.push(source("fake", "one", [msg(0, "user", "original question")]));

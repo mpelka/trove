@@ -8,8 +8,35 @@ import type {
   NormalizedSession,
   ParseResult,
   SourceRef,
+  ToolCall,
 } from "./types.ts";
 import { shellQuote } from "./shell.ts";
+
+const BASH_INPUT_MAX = 500;
+const OTHER_INPUT_MAX = 200;
+
+/** Collapse whitespace to single spaces and truncate to `max` chars (with an ellipsis). */
+function compact(s: string, max: number): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+}
+
+/** Derive a SHORT, one-line input descriptor for a tool_use block, never including large
+ *  blob fields (content, new_string, old_string, file bodies) — those are the bloat we drop. */
+function toolInput(name: string, input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const o = input as Record<string, unknown>;
+  // Bash: the whole command, generously truncated.
+  if (name === "Bash" && typeof o.command === "string") {
+    return compact(o.command, BASH_INPUT_MAX);
+  }
+  // Everything else: first useful key present, in priority order.
+  for (const key of ["command", "file_path", "path", "pattern", "query", "url", "description"]) {
+    const v = o[key];
+    if (typeof v === "string" && v.trim()) return compact(v, OTHER_INPUT_MAX);
+  }
+  return ""; // no useful scalar key → name-only
+}
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
@@ -21,7 +48,11 @@ function projectsDir(): string {
 
 /** Extract the "meat" from one CC message.content: keep text (incl. code), drop
  *  thinking / tool_result bodies / images; record tool_use as a compact marker. */
-function extractContent(content: unknown): { text: string; hasProse: boolean } {
+function extractContent(content: unknown): {
+  text: string;
+  hasProse: boolean;
+  toolCalls?: ToolCall[];
+} {
   if (content == null) return { text: "", hasProse: false };
   if (typeof content === "string") {
     const s = content.trim();
@@ -31,6 +62,7 @@ function extractContent(content: unknown): { text: string; hasProse: boolean } {
 
   const prose: string[] = [];
   const toolNames: string[] = [];
+  const toolCalls: ToolCall[] = [];
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     const b = block as Record<string, unknown>;
@@ -39,7 +71,11 @@ function extractContent(content: unknown): { text: string; hasProse: boolean } {
         if (typeof b.text === "string" && b.text.trim()) prose.push(b.text.trim());
         break;
       case "tool_use":
-        if (typeof b.name === "string") toolNames.push(b.name);
+        if (typeof b.name === "string") {
+          toolNames.push(b.name);
+          // One record per tool_use, in order (NOT deduped) — the compact input for the GUI.
+          toolCalls.push({ name: b.name, input: toolInput(b.name, b.input) });
+        }
         break;
       // thinking, redacted_thinking, tool_result, image → dropped (bulk + noise)
     }
@@ -47,7 +83,7 @@ function extractContent(content: unknown): { text: string; hasProse: boolean } {
   if (prose.length) return { text: prose.join("\n\n"), hasProse: true };
   if (toolNames.length) {
     const uniq = [...new Set(toolNames)];
-    return { text: `[used: ${uniq.join(", ")}]`, hasProse: false };
+    return { text: `[used: ${uniq.join(", ")}]`, hasProse: false, toolCalls };
   }
   return { text: "", hasProse: false };
 }
@@ -188,6 +224,7 @@ export const claudeCodeAdapter: Adapter = {
         parentUid: typeof obj.parentUuid === "string" ? obj.parentUuid : null,
         timestamp: Number.isNaN(ts) ? null : ts,
         text: extracted.text,
+        ...(extracted.toolCalls?.length ? { toolCalls: extracted.toolCalls } : {}),
       });
     }
 

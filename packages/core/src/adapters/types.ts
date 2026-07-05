@@ -16,6 +16,13 @@ export interface SourceRef {
   nativeIdHint?: string;
 }
 
+/** One compact per-tool_use record: the tool name + a short input descriptor.
+ *  Large blob fields (file bodies, new/old_string, content) are never captured. */
+export interface ToolCall {
+  name: string;
+  input: string;
+}
+
 export interface NormalizedMessage {
   uid?: string | null;
   seq: number;
@@ -23,6 +30,9 @@ export interface NormalizedMessage {
   parentUid?: string | null;
   timestamp?: number | null; // epoch ms
   text: string;
+  // One entry per tool_use block in order (NOT deduped like `text`). Absent for
+  // non-tool messages. Serialized to the `tool_calls` JSON column at the sync boundary.
+  toolCalls?: ToolCall[];
 }
 
 export interface NormalizedSession {

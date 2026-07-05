@@ -245,6 +245,7 @@ export const antigravityAdapter: Adapter = {
 
       let role: NormalizedMessage["role"];
       let text: string;
+      let toolCalls: NormalizedMessage["toolCalls"];
       if (row.step_type === STEP_TYPE_USER) {
         const t = protoString(subMessage(payload, 19)?.get(2)?.[0])?.trim() ?? "";
         if (!t) continue;
@@ -264,6 +265,9 @@ export const antigravityAdapter: Adapter = {
         if (!title) continue; // internal/undecodable step → skip
         role = "tool";
         text = `[used: ${title}]`;
+        // agy has no separate command/input — the human title IS the descriptor. Carry it
+        // as the tool name so the GUI expand shows the same per-step title, one per step.
+        toolCalls = [{ name: title, input: "" }];
       }
 
       messages.push({
@@ -273,6 +277,7 @@ export const antigravityAdapter: Adapter = {
         parentUid: null, // parent_references exists but has been empty on real stores
         timestamp: ts,
         text,
+        ...(toolCalls ? { toolCalls } : {}),
       });
     }
 

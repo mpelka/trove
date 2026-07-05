@@ -39,6 +39,7 @@ export interface MessageRow {
   parent_uid: string | null;
   timestamp: number | null;
   text: string;
+  tool_calls: string | null; // JSON array `[{name,input}, …]`; null for non-tool / pre-#20 rows
 }
 
 export interface MetaRow {

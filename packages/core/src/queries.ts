@@ -268,6 +268,7 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
       parent_uid: messages.parentUid,
       timestamp: messages.timestamp,
       text: messages.text,
+      tool_calls: messages.toolCalls,
     })
     .from(messages)
     .where(eq(messages.sessionId, id))

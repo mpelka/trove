@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Highlighter } from "lucide-react";
-import { fmtRel, rehypeHighlight, rehypeHighlightExact, summarizeTools, buildItems, type HL } from "./lib.ts";
+import { fmtRel, rehypeHighlight, rehypeHighlightExact, summarizeTools, buildItems, type HL, type ToolCall } from "./lib.ts";
 
 // A saved highlight, as the message list needs it (per-message grouping happens in MessageList).
 export interface MsgHighlight {
@@ -70,20 +70,49 @@ const ChatMessage = memo(function ChatMessage(props: {
   );
 });
 
-function ToolGroup({ id, summary, ts }: { id: number; summary: string; ts: number | null }) {
+function ToolGroup({
+  id,
+  summary,
+  calls,
+  ts,
+}: {
+  id: number;
+  summary: string;
+  calls: ToolCall[];
+  ts: number | null;
+}) {
+  const [open, setOpen] = useState(false);
+  // Expandable only when we actually have per-call detail to show.
+  const canExpand = calls.length > 0;
   return (
     <div className="msg tool" id={`msg-${id}`}>
       <div className="who">
         <span className="dot" />
         tools<span className="t">{fmtRel(ts)}</span>
       </div>
-      <div className="text">{summary}</div>
+      <div
+        className={`text${canExpand ? " expandable" : ""}`}
+        onClick={canExpand ? () => setOpen((o) => !o) : undefined}
+      >
+        {canExpand && <span className="caret">{open ? "▾" : "▸"}</span>}
+        {summary}
+      </div>
+      {open && canExpand && (
+        <ul className="tool-calls">
+          {calls.map((c, i) => (
+            <li key={i}>
+              <span className="tc-name">{c.name}</span>
+              {c.input && <code className="tc-input">{c.input}</code>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
 export const MessageList = memo(function MessageList(props: {
-  messages: { id: number; uid: string | null; seq: number; role: string; text: string; timestamp: number | null }[];
+  messages: { id: number; uid: string | null; seq: number; role: string; text: string; timestamp: number | null; tool_calls?: string | null }[];
   highlight: string;
   highlights: MsgHighlight[];
   expandAll: boolean;
@@ -116,7 +145,7 @@ export const MessageList = memo(function MessageList(props: {
     <div className="messages">
       {items.map((it) =>
         it.kind === "tools" ? (
-          <ToolGroup key={it.id} id={it.id} summary={summarizeTools(it.counts)} ts={it.ts} />
+          <ToolGroup key={it.id} id={it.id} summary={summarizeTools(it.counts)} calls={it.calls} ts={it.ts} />
         ) : (
           <ChatMessage
             key={it.id}

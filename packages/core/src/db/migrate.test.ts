@@ -15,8 +15,15 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { openDb } from "./client.ts";
 
-// The shipped baseline migration folder, resolved relative to this test module.
+// The shipped migration folder, resolved relative to this test module.
 const shippedMigrations = fileURLToPath(new URL("../../drizzle", import.meta.url));
+
+// Number of shipped migrations (0000 baseline + every forward migration). openDb applies them
+// all on a fresh/untracked DB, so __drizzle_migrations ends with this many rows. Read from the
+// journal so this test stays correct as new migrations are added.
+const SHIPPED_MIGRATION_COUNT: number = JSON.parse(
+  readFileSync(join(shippedMigrations, "meta", "_journal.json"), "utf8"),
+).entries.length;
 
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -70,11 +77,11 @@ describe("schema migrations (issue #19)", () => {
       .all("findable");
     expect(hits.length).toBe(1);
 
-    // The baseline is now tracked, so a re-run would be a no-op.
+    // Every shipped migration is now tracked, so a re-run would be a no-op.
     const migCount = db
       .query<{ c: number }, []>("SELECT COUNT(*) AS c FROM __drizzle_migrations")
       .get()!.c;
-    expect(migCount).toBe(1);
+    expect(migCount).toBe(SHIPPED_MIGRATION_COUNT);
 
     db.close();
   });
@@ -88,7 +95,7 @@ describe("schema migrations (issue #19)", () => {
       .query<{ c: number }, []>("SELECT COUNT(*) AS c FROM __drizzle_migrations")
       .get()!.c;
     db1.close();
-    expect(first).toBe(1);
+    expect(first).toBe(SHIPPED_MIGRATION_COUNT);
 
     // Second open must not throw and must not add another migration row.
     const db2 = openDb(path);
@@ -96,7 +103,7 @@ describe("schema migrations (issue #19)", () => {
       .query<{ c: number }, []>("SELECT COUNT(*) AS c FROM __drizzle_migrations")
       .get()!.c;
     db2.close();
-    expect(second).toBe(1);
+    expect(second).toBe(SHIPPED_MIGRATION_COUNT);
   });
 
   it("c. existing populated DB: baselining a COPY of the real ~/.trove/trove.db preserves all data", () => {
@@ -167,74 +174,67 @@ describe("schema migrations (issue #19)", () => {
       .all("the");
     expect(ftsHits.length).toBeGreaterThan(0);
 
-    // Baseline is now recorded on the previously-untracked store.
+    // Every shipped migration is now recorded on the previously-untracked store.
     const migCount = db
       .query<{ c: number }, []>("SELECT COUNT(*) AS c FROM __drizzle_migrations")
       .get()!.c;
-    expect(migCount).toBe(1);
+    expect(migCount).toBe(SHIPPED_MIGRATION_COUNT);
 
     db.close();
   });
 
-  it("d. forward migration: a hand-written 0001 applies on top of a baselined DB", () => {
-    // Build a baselined DB using the shipped migrations.
+  it("d. forward migration: a hand-written future migration applies on top of a fully-baselined DB", () => {
+    // Build a DB with EVERY shipped migration recorded (0000 + all forward migrations).
     const dir = tmp("trove-migrate-fwd-");
     const path = join(dir, "fwd.db");
     const db = openDb(path);
     db.close();
 
-    // Assemble a temp migrations folder: the shipped baseline PLUS a new 0001 that adds a column.
-    // This proves the "survive a future update" promise without shipping a real 0001.
+    // Assemble a temp migrations folder: all shipped migrations verbatim PLUS one new
+    // hand-written migration that adds a column. This proves the "survive a future update"
+    // promise generically, independent of what the newest shipped migration happens to be.
     const migDir = join(dir, "migrations");
     const metaDir = join(migDir, "meta");
     mkdirSync(metaDir, { recursive: true });
 
-    // Reuse the shipped baseline file + snapshot verbatim so its hash matches the recorded row
-    // (an unchanged baseline must NOT re-run).
-    const baselineTag = "0000_harsh_norrin_radd";
-    copyFileSync(
-      join(shippedMigrations, `${baselineTag}.sql`),
-      join(migDir, `${baselineTag}.sql`),
+    const shippedJournal = JSON.parse(
+      readFileSync(join(shippedMigrations, "meta", "_journal.json"), "utf8"),
     );
+    // Copy every shipped .sql + snapshot verbatim so their hashes match the recorded rows
+    // (an unchanged shipped migration must NOT re-run).
+    for (const entry of shippedJournal.entries as { idx: number; tag: string }[]) {
+      copyFileSync(join(shippedMigrations, `${entry.tag}.sql`), join(migDir, `${entry.tag}.sql`));
+      const snap = `${String(entry.idx).padStart(4, "0")}_snapshot.json`;
+      copyFileSync(join(shippedMigrations, "meta", snap), join(metaDir, snap));
+    }
+
+    const nextIdx = shippedJournal.entries.length;
+    const newestWhen = Math.max(...shippedJournal.entries.map((e: { when: number }) => e.when));
+    const newTag = `${String(nextIdx).padStart(4, "0")}_add_test_col`;
+    // Snapshot for the new migration can mirror the newest shipped snapshot; the runtime
+    // migrator ignores snapshots.
     copyFileSync(
-      join(shippedMigrations, "meta", "0000_snapshot.json"),
-      join(metaDir, "0000_snapshot.json"),
-    );
-    // Snapshot for 0001 can mirror the baseline snapshot; the runtime migrator ignores snapshots.
-    copyFileSync(
-      join(shippedMigrations, "meta", "0000_snapshot.json"),
-      join(metaDir, "0001_snapshot.json"),
+      join(shippedMigrations, "meta", `${String(nextIdx - 1).padStart(4, "0")}_snapshot.json`),
+      join(metaDir, `${String(nextIdx).padStart(4, "0")}_snapshot.json`),
     );
 
     // A minimal incremental migration (plain ALTER — no need for IF NOT EXISTS, runs once).
     writeFileSync(
-      join(migDir, "0001_add_test_col.sql"),
+      join(migDir, `${newTag}.sql`),
       "ALTER TABLE `session_meta` ADD `test_col` integer;\n",
     );
 
-    // Journal listing both entries. The baseline entry must keep the SHIPPED `when` value,
-    // because that is what openDb recorded in __drizzle_migrations for this DB — the migrator
-    // only runs a migration whose folderMillis is greater than the newest recorded one, so
-    // 0001 must carry a strictly larger `when` to be picked up (and the baseline, matching,
-    // is skipped).
-    const shippedJournal = JSON.parse(
-      readFileSync(join(shippedMigrations, "meta", "_journal.json"), "utf8"),
-    );
-    const baselineWhen = shippedJournal.entries[0].when as number;
+    // Journal: every shipped entry verbatim (their `when` values must match what openDb
+    // recorded so they're skipped) plus the new one with a strictly-larger `when` so the
+    // migrator picks it up.
     writeFileSync(
       join(metaDir, "_journal.json"),
       JSON.stringify({
         version: "7",
         dialect: "sqlite",
         entries: [
-          { idx: 0, version: "6", when: baselineWhen, tag: baselineTag, breakpoints: true },
-          {
-            idx: 1,
-            version: "6",
-            when: baselineWhen + 1,
-            tag: "0001_add_test_col",
-            breakpoints: true,
-          },
+          ...shippedJournal.entries,
+          { idx: nextIdx, version: "6", when: newestWhen + 1, tag: newTag, breakpoints: true },
         ],
       }),
     );
@@ -251,12 +251,83 @@ describe("schema migrations (issue #19)", () => {
       .map((c) => c.name);
     expect(cols).toContain("test_col");
 
-    // ...and __drizzle_migrations gained the 0001 row (baseline was skipped, so total is 2).
+    // ...and __drizzle_migrations gained the new row (all shipped ones were skipped).
     const migCount = db2
       .query<{ c: number }, []>("SELECT COUNT(*) AS c FROM __drizzle_migrations")
       .get()!.c;
-    expect(migCount).toBe(2);
+    expect(migCount).toBe(SHIPPED_MIGRATION_COUNT + 1);
 
     db2.close();
+  });
+
+  it("e. shipped 0001 applies on a baselined DB and adds messages.tool_calls (issue #20)", () => {
+    const dir = tmp("trove-migrate-0001-");
+    const path = join(dir, "app.db");
+
+    // First open: baseline (0000) only — 0001 will apply on the SECOND open below, proving it
+    // lands cleanly on an already-baselined store (the real ~/.trove/trove.db upgrade path).
+    // To isolate 0000, run the migrator against a one-entry folder built from the shipped baseline.
+    const baseDir = join(dir, "base");
+    const baseMeta = join(baseDir, "meta");
+    mkdirSync(baseMeta, { recursive: true });
+    const baselineTag = "0000_harsh_norrin_radd";
+    copyFileSync(join(shippedMigrations, `${baselineTag}.sql`), join(baseDir, `${baselineTag}.sql`));
+    copyFileSync(
+      join(shippedMigrations, "meta", "0000_snapshot.json"),
+      join(baseMeta, "0000_snapshot.json"),
+    );
+    const shippedJournal = JSON.parse(
+      readFileSync(join(shippedMigrations, "meta", "_journal.json"), "utf8"),
+    );
+    writeFileSync(
+      join(baseMeta, "_journal.json"),
+      JSON.stringify({
+        version: "7",
+        dialect: "sqlite",
+        entries: [shippedJournal.entries[0]],
+      }),
+    );
+    const b = new Database(path, { create: true });
+    b.exec("PRAGMA foreign_keys = OFF;");
+    migrate(drizzle(b), { migrationsFolder: baseDir });
+    // Sanity: baseline recorded, tool_calls NOT yet present.
+    expect(
+      b.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM __drizzle_migrations").get()!.c,
+    ).toBe(1);
+    const before = b
+      .query<{ name: string }, []>("PRAGMA table_info(messages)")
+      .all()
+      .map((c) => c.name);
+    expect(before).not.toContain("tool_calls");
+    // A row to prove data survives the ALTER.
+    b.query("INSERT INTO messages (session_id, seq, role, text) VALUES (?,?,?,?)").run(
+      "s1",
+      0,
+      "user",
+      "hello",
+    );
+    b.close();
+
+    // Second open: the FULL shipped migrations folder (0000 + 0001). 0000 is skipped
+    // (already recorded); the real 0001 applies and adds the column.
+    const db = openDb(path);
+    const cols = db
+      .query<{ name: string }, []>("PRAGMA table_info(messages)")
+      .all()
+      .map((c) => c.name);
+    expect(cols).toContain("tool_calls");
+    // Pre-existing row preserved; its tool_calls defaults to NULL.
+    const row = db
+      .query<{ text: string; tool_calls: string | null }, []>(
+        "SELECT text, tool_calls FROM messages WHERE session_id = 's1'",
+      )
+      .get()!;
+    expect(row.text).toBe("hello");
+    expect(row.tool_calls).toBeNull();
+    // Both migrations now recorded.
+    expect(
+      db.query<{ c: number }, []>("SELECT COUNT(*) AS c FROM __drizzle_migrations").get()!.c,
+    ).toBe(2);
+    db.close();
   });
 });

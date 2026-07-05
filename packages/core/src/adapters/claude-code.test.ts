@@ -150,6 +150,64 @@ describe("claudeCodeAdapter.parse", () => {
     expect(parsed!.contentHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("captures compact per-tool_use toolCalls, truncating Bash and excluding blobs", async () => {
+    const longCmd = "echo " + "x".repeat(700); // > 500 → truncated
+    const path = writeFixture("proj/toolcalls-session.jsonl", [
+      {
+        type: "user",
+        uuid: "u1",
+        timestamp: "2025-06-01T10:00:00.000Z",
+        message: { role: "user", content: "do stuff" },
+      },
+      {
+        type: "assistant",
+        uuid: "a1",
+        timestamp: "2025-06-01T10:00:05.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "tool_use", name: "Bash", input: { command: longCmd, description: "run it" } },
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: {
+                file_path: "src/foo.ts",
+                old_string: "HUGE OLD BLOB ".repeat(500),
+                new_string: "HUGE NEW BLOB ".repeat(500),
+              },
+            },
+            { type: "tool_use", name: "Read", input: { file_path: "src/bar.ts" } },
+            { type: "tool_use", name: "Bash", input: { command: "git status" } },
+          ],
+        },
+      },
+    ]);
+    const parsed = await claudeCodeAdapter.parse(refFor(path));
+    const tool = parsed!.session.messages.find((m) => m.role === "tool")!;
+
+    // text summary stays deduped/first-seen for back-compat.
+    expect(tool.text).toBe("[used: Bash, Edit, Read]");
+
+    // toolCalls: one entry PER tool_use, in order (NOT deduped).
+    expect(tool.toolCalls?.map((c) => c.name)).toEqual(["Bash", "Edit", "Read", "Bash"]);
+
+    // Bash command captured, truncated to ~500 chars, ends with an ellipsis; blob 'description' ignored.
+    const bash0 = tool.toolCalls![0];
+    expect(bash0.name).toBe("Bash");
+    expect(bash0.input.startsWith("echo xxx")).toBe(true);
+    expect(bash0.input.length).toBeLessThanOrEqual(500);
+    expect(bash0.input.endsWith("…")).toBe(true);
+
+    // Edit → file_path only; large old_string/new_string blobs are NOT present anywhere.
+    expect(tool.toolCalls![1]).toEqual({ name: "Edit", input: "src/foo.ts" });
+    expect(tool.toolCalls![2]).toEqual({ name: "Read", input: "src/bar.ts" });
+    expect(tool.toolCalls![3]).toEqual({ name: "Bash", input: "git status" });
+
+    const serialized = JSON.stringify(tool.toolCalls);
+    expect(serialized).not.toContain("HUGE OLD BLOB");
+    expect(serialized).not.toContain("HUGE NEW BLOB");
+  });
+
   it("uses customTitle when no summary line exists", async () => {
     const path = writeFixture("proj/custom-title-session.jsonl", [
       { type: "file-history-snapshot", customTitle: "My Custom Name" },

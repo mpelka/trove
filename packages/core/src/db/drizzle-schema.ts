@@ -48,6 +48,10 @@ export const messages = sqliteTable("messages", {
   parentUid: text("parent_uid"),
   timestamp: integer("timestamp"),
   text: text("text").notNull(),
+  // JSON array of compact per-tool_use records `[{name,input}, …]`, one per tool_use in
+  // order (NOT deduped like the `text` summary). null/absent for non-tool messages and
+  // for rows synced before issue #20. Stringify/parse stays at the call boundary.
+  toolCalls: text("tool_calls"),
 });
 
 export const sessionMeta = sqliteTable("session_meta", {

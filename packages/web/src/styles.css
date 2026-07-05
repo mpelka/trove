@@ -286,6 +286,14 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 .msg.assistant .who { color: var(--assistant); }
 .msg.tool .who { color: var(--dim-2); }
 .msg.tool .text { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+/* expandable tool group (issue #20): click the summary to reveal per-call detail */
+.msg.tool .text.expandable { cursor: pointer; user-select: none; }
+.msg.tool .text.expandable:hover { color: var(--text); }
+.msg.tool .text .caret { display: inline-block; width: 1em; color: var(--dim-2); }
+.msg.tool .tool-calls { list-style: none; margin: 4px 0 0; padding: 0 0 0 1em; display: flex; flex-direction: column; gap: 3px; }
+.msg.tool .tool-calls li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; min-width: 0; }
+.msg.tool .tool-calls .tc-name { color: var(--dim-2); font-weight: 600; flex: none; }
+.msg.tool .tool-calls .tc-input { color: var(--dim); font-family: var(--mono); white-space: pre-wrap; word-break: break-word; min-width: 0; }
 .msg .more { color: var(--accent); cursor: pointer; font-size: 12px; margin-top: 4px; }
 .clampwrap.clamped {
   max-height: 340px;

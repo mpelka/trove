@@ -75,6 +75,7 @@ program
   .description("Discover, archive, and index new/changed sessions across all agents")
   .option("--agent <id>", "only this agent")
   .option("--keep-raw", "also keep a gzipped copy of the raw source (resumable safety net)")
+  .option("--force", "reindex every session even if unchanged (use after a trove upgrade)")
   .option("--json", "output JSON")
   .action(async (opts) => {
     const ctx = openContext();
@@ -82,6 +83,7 @@ program
       const r = await sync(ctx.db, ctx.adapters, {
         agentIds: opts.agent ? [opts.agent] : undefined,
         keepRaw: !!opts.keepRaw,
+        force: !!opts.force,
         onProgress: opts.json ? undefined : (m) => console.error(c.dim(m)),
       });
       if (opts.json) console.log(JSON.stringify(r, null, 2));
