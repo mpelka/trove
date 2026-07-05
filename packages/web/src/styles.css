@@ -91,6 +91,8 @@ body {
 /* Resizable split: grid with a draggable 6px divider column; --sidebar-w is set by
    the Divider component (drag), persisted to localStorage, double-click resets. */
 .body { display: grid; grid-template-columns: var(--sidebar-w, 44%) 6px minmax(0, 1fr); flex: 1; min-height: 0; }
+/* when the info panel is open, add a second divider + a fixed-ish info column on the right */
+.body.info-open { grid-template-columns: var(--sidebar-w, 44%) 6px minmax(0, 1fr) 6px var(--info-w, 340px); }
 .sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .divider { cursor: col-resize; position: relative; touch-action: none; }
 .divider::after { content: ""; position: absolute; inset: 0; left: 2px; width: 1px; background: var(--border); }
@@ -209,10 +211,52 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 .custom-mark { color: var(--accent); font-size: 12px; cursor: default; flex: none; }
 .dh-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
 .dh-actions .iconbtn { width: 28px; height: 28px; font-size: 13px; }
-.dh-meta { color: var(--dim); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; align-items: center; }
-.dh-meta .k { color: var(--dim-2); }
-/* short git-style id in the detail meta */
+/* short git-style id (now shown in the info panel's metadata list) */
 .sid { font-family: var(--mono); font-size: 11px; color: var(--dim-2); cursor: pointer; }
+
+/* ── info / metadata panel (issue #22) ───────────────────────────────────────
+   A third, collapsible column on the right of the detail pane — trove's home for
+   per-session sidecar data (metadata, ghostwriter summary, saved highlights). */
+.info-panel { min-width: 0; overflow-y: auto; border-left: 1px solid var(--border); background: var(--panel); }
+.info-body { padding: 14px 16px 40px; display: flex; flex-direction: column; gap: 20px; }
+.info-sec { display: flex; flex-direction: column; gap: 8px; }
+.info-h { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim-2); margin: 0; }
+.info-h-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.info-count { color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 600; }
+.info-empty { color: var(--dim-2); font-size: 12px; margin: 0; }
+
+/* metadata: two-column definition list, label | value */
+.info-meta { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: 12px; align-items: baseline; }
+.info-meta dt { color: var(--dim-2); }
+.info-meta dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.info-meta dd.info-agent { display: inline-flex; align-items: center; gap: 6px; }
+.info-meta dd.info-agent .agentlogo { width: 16px; height: 16px; }
+
+.info-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.tag-chip { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--dim); font-size: 11px; }
+.info-notes { margin: 4px 0 0; font-size: 12px; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* the ghost-card sits flush in the panel (no extra top margin) */
+.info-sec .ghost-card { margin-top: 0; }
+.info-sec .ghost-error { margin-top: 0; }
+
+/* highlights list */
+.info-hl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.info-hl { display: flex; align-items: flex-start; gap: 4px; }
+.info-hl-jump {
+  flex: 1; min-width: 0; text-align: left; background: none; border: none; padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.info-hl-quote {
+  font-size: 12px; color: var(--text); line-height: 1.4;
+  border-left: 3px solid light-dark(oklch(72% 0.15 92), oklch(62% 0.13 92));
+  padding-left: 8px;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.info-hl-jump:hover .info-hl-quote { color: var(--accent); }
+.info-hl-note { font-size: 11px; color: var(--dim); font-style: italic; padding-left: 8px; }
+.info-hl-x { flex: none; width: 22px; height: 22px; border: none; background: transparent; }
+.info-hl-x:hover { color: var(--danger); border: none; }
 
 /* ── ghostwriter summary (issue #17) ──────────────────────────────────────── */
 @keyframes trove-spin { to { transform: rotate(360deg); } }

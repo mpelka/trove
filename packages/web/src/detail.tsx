@@ -13,14 +13,17 @@ import {
   RefreshCw,
   X,
   ChevronRight,
+  PanelRight,
+  PanelRightOpen,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog, Tooltip, Checkbox, Button, Badge } from "@cloudflare/kumo";
 import { trpc } from "./trpc.ts";
-import { fmtRel, projLabel, shortId } from "./lib.ts";
+import { fmtRel, fmtSize, projLabel, shortId } from "./lib.ts";
 import { AgentBadge } from "./rows.tsx";
 import { MessageList } from "./messages.tsx";
+import { Divider } from "./divider.tsx";
 
 const mdComponents = { a: (props: any) => <a {...props} target="_blank" rel="noopener noreferrer" /> };
 
@@ -150,25 +153,189 @@ function SummaryCard({
   );
 }
 
+// ── metadata panel (issue #22): the session's sidecar data lives here ────────
+function InfoPanel({
+  session,
+  summary,
+  summaryError,
+  summarizing,
+  onSummarize,
+  onRemoveSummary,
+  summarizerAvailable,
+  highlights,
+  onJumpHighlight,
+  onRemoveHighlight,
+  onProjectClick,
+}: {
+  session: any;
+  summary: { text: string; createdAt: number } | null;
+  summaryError: string | null;
+  summarizing: boolean;
+  onSummarize(force: boolean): void;
+  onRemoveSummary(): void;
+  summarizerAvailable: boolean;
+  highlights: { id: number; messageUid: string | null; messageSeq: number | null; text: string; note: string | null; createdAt: number }[];
+  onJumpHighlight(h: { messageUid: string | null; messageSeq: number | null }): void;
+  onRemoveHighlight(id: number): void;
+  onProjectClick(project: string): void;
+}) {
+  const s = session;
+  const [copied, setCopied] = useState(false);
+  const copyLink = async () => {
+    await copyText(`${location.origin}${location.pathname}?s=${encodeURIComponent(s.id)}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+  const abs = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : "");
+
+  return (
+    <aside className="info-panel">
+      <div className="info-body">
+        <section className="info-sec">
+          <h3 className="info-h">Metadata</h3>
+          <dl className="info-meta">
+            <dt>project</dt>
+            <dd title={s.projectPath ? `${s.projectPath} — click to filter the list` : ""}>
+              {s.projectPath ? (
+                <button className="linklike" onClick={() => onProjectClick(s.projectPath)}>
+                  {projLabel(s.projectPath)}
+                </button>
+              ) : (
+                projLabel(s.projectPath)
+              )}
+            </dd>
+            <dt>agent</dt>
+            <dd className="info-agent">
+              <AgentBadge agent={s.agent} /> {s.agent}
+            </dd>
+            <dt>model</dt>
+            <dd>{s.model ?? "?"}</dd>
+            <dt>created</dt>
+            <dd title={abs(s.createdAt)}>{fmtRel(s.createdAt)}</dd>
+            <dt>updated</dt>
+            <dd title={abs(s.updatedAt)}>{fmtRel(s.updatedAt)}</dd>
+            <dt>turns</dt>
+            <dd>{s.turnCount ?? 0}</dd>
+            <dt>msgs</dt>
+            <dd>{s.messageCount ?? 0}</dd>
+            <dt>size</dt>
+            <dd>{fmtSize(s.sizeBytes)}</dd>
+            <dt>id</dt>
+            <dd>
+              <a
+                className="sid"
+                href={`?s=${encodeURIComponent(s.id)}`}
+                title={`${s.id} — click to copy a link to this session`}
+                onClick={(e) => {
+                  e.preventDefault(); // plain click copies the deep link; cmd-click opens it
+                  copyLink();
+                }}
+              >
+                {shortId(s.id)}
+                {copied ? " ✓ copied" : ""}
+              </a>
+            </dd>
+          </dl>
+          {s.tags?.length > 0 && (
+            <div className="info-tags">
+              {s.tags.map((t: string) => (
+                <span key={t} className="tag-chip">
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
+          {s.notes && <p className="info-notes">{s.notes}</p>}
+        </section>
+
+        {summarizerAvailable && (
+          <section className="info-sec">
+            <div className="info-h-row">
+              <h3 className="info-h">Summary</h3>
+              {!summary && (
+                <IconButton
+                  label="summarize"
+                  className={`ghost-btn${summarizing ? " on" : ""}`}
+                  onClick={() => !summarizing && onSummarize(false)}
+                >
+                  <Sparkles size={13} className={summarizing ? "spin" : ""} />
+                </IconButton>
+              )}
+            </div>
+            {summaryError && <div className="ghost-error">{summaryError}</div>}
+            {summary ? (
+              <SummaryCard
+                summary={summary}
+                refreshing={summarizing}
+                onRefresh={() => !summarizing && onSummarize(true)}
+                onRemove={onRemoveSummary}
+              />
+            ) : (
+              !summaryError && <p className="info-empty">No summary yet.</p>
+            )}
+          </section>
+        )}
+
+        <section className="info-sec">
+          <h3 className="info-h">
+            Highlights {highlights.length > 0 && <span className="info-count">{highlights.length}</span>}
+          </h3>
+          {highlights.length === 0 ? (
+            <p className="info-empty">Select text in the conversation to save a highlight.</p>
+          ) : (
+            <ul className="info-hl-list">
+              {highlights.map((h) => (
+                <li key={h.id} className="info-hl">
+                  <button
+                    className="info-hl-jump"
+                    title="jump to this message"
+                    onClick={() => onJumpHighlight(h)}
+                  >
+                    <span className="info-hl-quote">{h.text}</span>
+                    {h.note && <span className="info-hl-note">{h.note}</span>}
+                  </button>
+                  <IconButton
+                    label="remove highlight"
+                    className="ghost-btn info-hl-x"
+                    onClick={() => onRemoveHighlight(h.id)}
+                  >
+                    <X size={12} />
+                  </IconButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </aside>
+  );
+}
+
 // ── detail head (owns the typing-heavy state, isolated from MessageList) ─────
 function DetailHead({
   session,
   resumeCommand,
   summary,
   summarizerAvailable,
+  summarizing,
+  onSummarize,
   expandAll,
   onToggleExpand,
+  infoOpen,
+  onToggleInfo,
   onDeleted,
-  onProjectClick,
 }: {
   session: any;
   resumeCommand: string | null;
   summary: { text: string; createdAt: number } | null;
   summarizerAvailable: boolean;
+  summarizing: boolean;
+  onSummarize(force: boolean): void;
   expandAll: boolean;
   onToggleExpand(): void;
+  infoOpen: boolean;
+  onToggleInfo(): void;
   onDeleted(): void;
-  onProjectClick(project: string): void;
 }) {
   const qc = useQueryClient();
   const s = session;
@@ -176,32 +343,12 @@ function DetailHead({
   const [draft, setDraft] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["detail", s.id] });
     qc.invalidateQueries({ queryKey: ["list"] });
     qc.invalidateQueries({ queryKey: ["search"] });
   };
-  const mSummarize = useMutation({
-    mutationFn: (force: boolean) => trpc.summarize.mutate({ id: s.id, force }),
-    onSuccess: (r) => {
-      if (r.ok) {
-        setSummaryError(null);
-        qc.invalidateQueries({ queryKey: ["detail", s.id] });
-      } else {
-        setSummaryError(r.error);
-      }
-    },
-    onError: (e: any) => setSummaryError(e?.message ?? "summarize failed"),
-  });
-  const mRemoveSummary = useMutation({
-    mutationFn: () => trpc.removeSummary.mutate({ id: s.id }),
-    onSuccess: () => {
-      setSummaryError(null);
-      qc.invalidateQueries({ queryKey: ["detail", s.id] });
-    },
-  });
   const mName = useMutation({
     mutationFn: (name: string | null) => trpc.setName.mutate({ id: s.id, name }),
     onSuccess: invalidate,
@@ -285,10 +432,10 @@ function DetailHead({
           {summarizerAvailable && (
             <IconButton
               label={summary ? "re-summarize" : "summarize"}
-              className={`iconbtn${mSummarize.isPending ? " on" : ""}`}
-              onClick={() => !mSummarize.isPending && mSummarize.mutate(!!summary)}
+              className={`iconbtn${summarizing ? " on" : ""}`}
+              onClick={() => !summarizing && onSummarize(!!summary)}
             >
-              <Sparkles size={15} className={mSummarize.isPending ? "spin" : ""} />
+              <Sparkles size={15} className={summarizing ? "spin" : ""} />
             </IconButton>
           )}
           <IconButton label={expandAll ? "collapse all" : "expand all"} onClick={onToggleExpand}>
@@ -297,53 +444,15 @@ function DetailHead({
           <IconButton label="delete" className="iconbtn danger" onClick={() => setConfirming(true)}>
             <Trash2 size={14} />
           </IconButton>
+          <IconButton
+            label={infoOpen ? "hide info panel" : "show info panel"}
+            className={`iconbtn${infoOpen ? " on" : ""}`}
+            onClick={onToggleInfo}
+          >
+            {infoOpen ? <PanelRightOpen size={15} /> : <PanelRight size={15} />}
+          </IconButton>
         </div>
       </div>
-      <div className="dh-meta">
-        <span title={s.projectPath ? `${s.projectPath} — click to filter the list` : ""}>
-          <span className="k">project</span>{" "}
-          {s.projectPath ? (
-            <button className="linklike" onClick={() => onProjectClick(s.projectPath)}>
-              {projLabel(s.projectPath)}
-            </button>
-          ) : (
-            projLabel(s.projectPath)
-          )}
-        </span>
-        <span>
-          <span className="k">turns</span> {s.turnCount ?? 0}
-        </span>
-        <span>
-          <span className="k">msgs</span> {s.messageCount ?? 0}
-        </span>
-        <span>
-          <span className="k">model</span> {s.model ?? "?"}
-        </span>
-        <span>
-          <span className="k">updated</span> {fmtRel(s.updatedAt)}
-        </span>
-        <a
-          className="sid"
-          href={`?s=${encodeURIComponent(s.id)}`}
-          title={`${s.id} — click to copy a link to this session`}
-          onClick={(e) => {
-            e.preventDefault(); // plain click copies the deep link; cmd-click opens it
-            copy(`${location.origin}${location.pathname}?s=${encodeURIComponent(s.id)}`, "link");
-          }}
-        >
-          {shortId(s.id)}
-          {copied === "link" ? " ✓ link copied" : ""}
-        </a>
-      </div>
-      {summaryError && <div className="ghost-error">{summaryError}</div>}
-      {summary && (
-        <SummaryCard
-          summary={summary}
-          refreshing={mSummarize.isPending}
-          onRefresh={() => !mSummarize.isPending && mSummarize.mutate(true)}
-          onRemove={() => mRemoveSummary.mutate()}
-        />
-      )}
       <ConfirmDelete
         name={s.name}
         open={confirming}
@@ -410,23 +519,37 @@ function useHighlightSelection(rootRef: React.RefObject<HTMLDivElement | null>) 
   return { pending, clear: () => setPending(null) };
 }
 
+/** Scroll to a message and flash it, reusing the `msg-<id>` anchor + `.jump` class. */
+function jumpToMessage(msgId: number) {
+  const el = document.getElementById(`msg-${msgId}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("jump");
+  setTimeout(() => el.classList.remove("jump"), 1800);
+}
+
 // ── detail ────────────────────────────────────────────────────────────────
 export function Detail({
   id,
   targetMsgId,
   highlight,
+  infoOpen,
+  onToggleInfo,
   onDeleted,
   onProjectClick,
 }: {
   id: string | null;
   targetMsgId: number | null;
   highlight: string;
+  infoOpen: boolean;
+  onToggleInfo(): void;
   onDeleted(): void;
   onProjectClick(project: string): void;
 }) {
   const qc = useQueryClient();
   const [expandAll, setExpandAll] = useState(false);
   const [resetTick, setResetTick] = useState(0);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const { pending, clear } = useHighlightSelection(messagesRef);
   const { data, isLoading } = useQuery({
@@ -457,16 +580,46 @@ export function Detail({
     mutationFn: (hid: number) => trpc.removeHighlight.mutate({ id: hid }),
     onSuccess: invalidateHl,
   });
+  // Summary mutations live here (not in DetailHead) so both the head action and the
+  // info panel drive the same logic without duplicating it.
+  const mSummarize = useMutation({
+    mutationFn: (force: boolean) => trpc.summarize.mutate({ id: id!, force }),
+    onSuccess: (r) => {
+      if (r.ok) {
+        setSummaryError(null);
+        qc.invalidateQueries({ queryKey: ["detail", id] });
+      } else {
+        setSummaryError(r.error);
+      }
+    },
+    onError: (e: any) => setSummaryError(e?.message ?? "summarize failed"),
+  });
+  const mRemoveSummary = useMutation({
+    mutationFn: () => trpc.removeSummary.mutate({ id: id! }),
+    onSuccess: () => {
+      setSummaryError(null);
+      qc.invalidateQueries({ queryKey: ["detail", id] });
+    },
+  });
+  const summarize = (force: boolean) => {
+    if (!mSummarize.isPending) mSummarize.mutate(force);
+  };
 
   useEffect(() => {
     if (!data || targetMsgId == null) return;
-    const el = document.getElementById(`msg-${targetMsgId}`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("jump");
-    const t = setTimeout(() => el.classList.remove("jump"), 1800);
-    return () => clearTimeout(t);
+    jumpToMessage(targetMsgId);
   }, [data, targetMsgId]);
+
+  // Map a highlight (uid/seq) to its message id, then jump. Prefer the uid (stable
+  // across re-sync); fall back to positional seq.
+  const jumpToHighlight = (h: { messageUid: string | null; messageSeq: number | null }) => {
+    if (!data) return;
+    const msg =
+      (h.messageUid != null && data.messages.find((m) => m.uid === h.messageUid)) ||
+      (h.messageSeq != null && data.messages.find((m) => m.seq === h.messageSeq)) ||
+      null;
+    if (msg) jumpToMessage(msg.id);
+  };
 
   // Clicking an existing highlight mark removes it (discoverable via its remove-cursor).
   const onMessagesClick = (e: React.MouseEvent) => {
@@ -486,46 +639,69 @@ export function Detail({
     );
 
   return (
-    <div className="detail">
-      <DetailHead
-        session={data.session}
-        resumeCommand={data.resumeCommand}
-        summary={data.summary}
-        summarizerAvailable={summarizerAvailable}
-        expandAll={expandAll}
-        onToggleExpand={() => {
-          setExpandAll((v) => !v);
-          setResetTick((t) => t + 1);
-        }}
-        onDeleted={onDeleted}
-        onProjectClick={onProjectClick}
-      />
-      <div ref={messagesRef} onClick={onMessagesClick} className="messages-scroll">
-        <MessageList
-          messages={data.messages}
-          highlight={highlight}
-          highlights={data.highlights}
+    <>
+      <div className="detail">
+        <DetailHead
+          session={data.session}
+          resumeCommand={data.resumeCommand}
+          summary={data.summary}
+          summarizerAvailable={summarizerAvailable}
+          summarizing={mSummarize.isPending}
+          onSummarize={summarize}
           expandAll={expandAll}
-          resetTick={resetTick}
-        />
-      </div>
-      {pending && (
-        <button
-          className="hl-float"
-          style={{ left: pending.x, top: pending.y }}
-          // mousedown (not click) so the selection isn't cleared before we read it
-          onMouseDown={(e) => {
-            e.preventDefault();
-            mAdd.mutate({
-              text: pending.text,
-              messageUid: pending.messageUid,
-              messageSeq: pending.messageSeq,
-            });
+          onToggleExpand={() => {
+            setExpandAll((v) => !v);
+            setResetTick((t) => t + 1);
           }}
-        >
-          <Highlighter size={13} /> Highlight
-        </button>
+          infoOpen={infoOpen}
+          onToggleInfo={onToggleInfo}
+          onDeleted={onDeleted}
+        />
+        <div ref={messagesRef} onClick={onMessagesClick} className="messages-scroll">
+          <MessageList
+            messages={data.messages}
+            highlight={highlight}
+            highlights={data.highlights}
+            expandAll={expandAll}
+            resetTick={resetTick}
+          />
+        </div>
+        {pending && (
+          <button
+            className="hl-float"
+            style={{ left: pending.x, top: pending.y }}
+            // mousedown (not click) so the selection isn't cleared before we read it
+            onMouseDown={(e) => {
+              e.preventDefault();
+              mAdd.mutate({
+                text: pending.text,
+                messageUid: pending.messageUid,
+                messageSeq: pending.messageSeq,
+              });
+            }}
+          >
+            <Highlighter size={13} /> Highlight
+          </button>
+        )}
+      </div>
+      {infoOpen && (
+        <>
+          <Divider variant="info" />
+          <InfoPanel
+            session={data.session}
+            summary={data.summary}
+            summaryError={summaryError}
+            summarizing={mSummarize.isPending}
+            onSummarize={summarize}
+            onRemoveSummary={() => mRemoveSummary.mutate()}
+            summarizerAvailable={summarizerAvailable}
+            highlights={data.highlights}
+            onJumpHighlight={jumpToHighlight}
+            onRemoveHighlight={(hid) => mRemove.mutate(hid)}
+            onProjectClick={onProjectClick}
+          />
+        </>
       )}
-    </div>
+    </>
   );
 }

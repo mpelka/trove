@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@cloudflare/kumo";
 import { NuqsAdapter } from "nuqs/adapters/react";
 import { useQueryState, parseAsString, parseAsBoolean, parseAsInteger, parseAsStringEnum } from "nuqs";
+import { Divider } from "./divider.tsx";
 // Cloudflare Kumo (v2.6): styled, accessible components built on Base UI + Tailwind v4.
 // Kumo's design tokens theme the app; the interactive bits use Kumo primitives.
 import { queryClient } from "./trpc.ts";
@@ -39,43 +40,11 @@ try {
   if (l) document.documentElement.style.setProperty("--msg-line", l);
 } catch {}
 
-/** Drag handle between the panes: drag sets --sidebar-w (persisted), double-click resets. */
-function Divider() {
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const el = e.currentTarget;
-    el.classList.add("dragging");
-    const move = (ev: PointerEvent) => {
-      const w = Math.min(820, Math.max(320, ev.clientX));
-      document.documentElement.style.setProperty("--sidebar-w", `${w}px`);
-    };
-    const up = () => {
-      el.classList.remove("dragging");
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      const v = document.documentElement.style.getPropertyValue("--sidebar-w");
-      try {
-        if (v) localStorage.setItem("trove-sidebar-w", v);
-      } catch {}
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-  const reset = () => {
-    document.documentElement.style.removeProperty("--sidebar-w");
-    try {
-      localStorage.removeItem("trove-sidebar-w");
-    } catch {}
-  };
-  return (
-    <div
-      className="divider"
-      title="drag to resize — double-click to reset"
-      onPointerDown={onPointerDown}
-      onDoubleClick={reset}
-    />
-  );
-}
+// restore the info-panel width before first paint (same pattern) — drives --info-w
+try {
+  const iw = localStorage.getItem("trove-info-w");
+  if (iw) document.documentElement.style.setProperty("--info-w", iw);
+} catch {}
 
 function App() {
   // ALL view state lives in the URL (nuqs): shareable, back-button friendly, and a
@@ -101,6 +70,7 @@ function App() {
     parseAsStringEnum(["desc", "asc"]).withDefault("desc"),
   );
   const [hlView, setHlView] = useQueryState("hl", parseAsBoolean.withDefault(false));
+  const [infoOpen, setInfoOpen] = useQueryState("info", parseAsBoolean.withDefault(false));
   const [selId, setSelId] = useQueryState("s", parseAsString);
   const [selMsg, setSelMsg] = useQueryState("m", parseAsInteger);
   const dq = useDebounced(query, 160);
@@ -111,10 +81,14 @@ function App() {
     setSelMsg(sel?.msgId ?? null);
   };
 
+  // The info panel only renders when a session is selected (Detail owns it), so only then
+  // does the body need the 5-track grid template.
+  const bodyInfoOpen = infoOpen && !!selId;
+
   return (
     <div className="app">
       <Header query={query} setQuery={(v) => setQuery(v || null)} />
-      <div className="body">
+      <div className={`body${bodyInfoOpen ? " info-open" : ""}`}>
         <Sidebar
           query={dq}
           agent={agent ?? undefined}
@@ -142,6 +116,8 @@ function App() {
           id={selId}
           targetMsgId={selMsg}
           highlight={dq}
+          infoOpen={infoOpen}
+          onToggleInfo={() => setInfoOpen(infoOpen ? null : true)}
           onDeleted={() => select(null)}
           onProjectClick={(p) => setProject(p)}
         />
