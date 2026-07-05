@@ -11,6 +11,7 @@ export interface ListOptions {
   tag?: string;
   includeHidden?: boolean;
   sort?: "updated" | "created" | "name" | "turns";
+  order?: "asc" | "desc"; // default: desc for dates/turns, asc for name
   limit?: number;
 }
 
@@ -46,14 +47,16 @@ export function listSessions(db: Database, opts: ListOptions = {}): SessionListI
     where.push("meta.tags LIKE ?");
     params.push(`%"${opts.tag}"%`);
   }
-  const orderBy =
+  const field =
     opts.sort === "created"
-      ? "s.created_at DESC"
+      ? "s.created_at"
       : opts.sort === "name"
-        ? "name COLLATE NOCASE ASC"
+        ? "name COLLATE NOCASE"
         : opts.sort === "turns"
-          ? "s.turn_count DESC"
-          : "s.updated_at DESC";
+          ? "s.turn_count"
+          : "s.updated_at";
+  const dir = opts.order ?? (opts.sort === "name" ? "asc" : "desc");
+  const orderBy = `${field} ${dir === "asc" ? "ASC" : "DESC"}`;
   const sql = `
     SELECT s.id AS id, s.agent AS agent,
       COALESCE(meta.custom_name, s.source_title, s.native_id) AS name,

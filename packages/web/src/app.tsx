@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@cloudflare/kumo";
 import { NuqsAdapter } from "nuqs/adapters/react";
-import { useQueryState, parseAsString, parseAsBoolean, parseAsStringEnum } from "nuqs";
+import { useQueryState, parseAsString, parseAsBoolean, parseAsInteger, parseAsStringEnum } from "nuqs";
 // Cloudflare Kumo (v2.6): styled, accessible components built on Base UI + Tailwind v4.
 // Kumo's design tokens theme the app; the interactive bits use Kumo primitives.
 import { queryClient } from "./trpc.ts";
@@ -25,9 +25,11 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 function App() {
-  // Search state lives in the URL (nuqs) so it's shareable / back-button friendly.
+  // ALL view state lives in the URL (nuqs): shareable, back-button friendly, and a
+  // session link (?s=…&m=…) deep-links straight to a conversation/message.
   const [query, setQuery] = useQueryState("q", parseAsString.withDefault(""));
   const [agent, setAgent] = useQueryState("agent", parseAsString); // null = all agents
+  const [project, setProject] = useQueryState("project", parseAsString); // null = all projects
   const [starOnly, setStarOnly] = useQueryState("star", parseAsBoolean.withDefault(false));
   const [sort, setSort] = useQueryState(
     "sort",
@@ -37,8 +39,23 @@ function App() {
     "view",
     parseAsStringEnum(["sessions", "messages"]).withDefault("messages"),
   );
-  const [selected, setSelected] = useState<Selected>(null);
+  const [bsort, setBsort] = useQueryState(
+    "bsort",
+    parseAsStringEnum(["updated", "created"]).withDefault("updated"),
+  );
+  const [order, setOrder] = useQueryState(
+    "order",
+    parseAsStringEnum(["desc", "asc"]).withDefault("desc"),
+  );
+  const [selId, setSelId] = useQueryState("s", parseAsString);
+  const [selMsg, setSelMsg] = useQueryState("m", parseAsInteger);
   const dq = useDebounced(query, 160);
+
+  const selected: Selected = selId ? { id: selId, msgId: selMsg ?? null } : null;
+  const select = (sel: Selected) => {
+    setSelId(sel?.id ?? null);
+    setSelMsg(sel?.msgId ?? null);
+  };
 
   return (
     <div className="app">
@@ -48,21 +65,28 @@ function App() {
           query={dq}
           agent={agent ?? undefined}
           setAgent={(a) => setAgent(a ?? null)}
+          project={project}
+          setProject={setProject}
           starOnly={starOnly}
           setStarOnly={(fn) => setStarOnly((p) => fn(p))}
           sort={sort}
           setSort={(s) => setSort(s)}
           view={view}
           setView={(v) => setView(v)}
+          bsort={bsort}
+          setBsort={(v) => setBsort(v)}
+          order={order}
+          setOrder={(v) => setOrder(v)}
           selected={selected}
-          onSelect={setSelected}
+          onSelect={select}
         />
         <Detail
-          key={selected?.id ?? "none"}
-          id={selected?.id ?? null}
-          targetMsgId={selected?.msgId ?? null}
+          key={selId ?? "none"}
+          id={selId}
+          targetMsgId={selMsg}
           highlight={dq}
-          onDeleted={() => setSelected(null)}
+          onDeleted={() => select(null)}
+          onProjectClick={(p) => setProject(p)}
         />
       </div>
     </div>

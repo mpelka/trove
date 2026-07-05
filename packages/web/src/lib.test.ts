@@ -69,19 +69,20 @@ describe("projLabel", () => {
 });
 
 describe("shortId", () => {
+  // Separator is a typeable ":" (the old "·" wasn't on a keyboard); resolvers accept both.
   it("shortens claude-code uuids", () => {
-    expect(shortId("claude-code:7de4a1b2-0f0f-4e4e-8a8a-123456789abc")).toBe("cc·7de4a1b2");
+    expect(shortId("claude-code:7de4a1b2-0f0f-4e4e-8a8a-123456789abc")).toBe("cc:7de4a1b2");
   });
   it("uses the trailing token of gemini session-… native ids", () => {
-    expect(shortId("gemini-cli:session-2025-06-01T10-00-abcd1234")).toBe("gem·abcd1234");
+    expect(shortId("gemini-cli:session-2025-06-01T10-00-abcd1234")).toBe("gem:abcd1234");
   });
   it("abbreviates copilot/antigravity", () => {
-    expect(shortId("copilot:deadbeefcafe1234")).toBe("cop·deadbeef");
-    expect(shortId("antigravity:0123456789abcdef")).toBe("agy·01234567");
+    expect(shortId("copilot:deadbeefcafe1234")).toBe("cop:deadbeef");
+    expect(shortId("antigravity:0123456789abcdef")).toBe("agy:01234567");
   });
   it("keeps unknown agents and handles ids without a namespace", () => {
-    expect(shortId("codex:deadbeefcafe1234")).toBe("codex·deadbeef");
-    expect(shortId("deadbeefcafe1234")).toBe("·deadbeef");
+    expect(shortId("codex:deadbeefcafe1234")).toBe("codex:deadbeef");
+    expect(shortId("deadbeefcafe1234")).toBe(":deadbeef");
   });
 });
 

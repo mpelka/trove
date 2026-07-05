@@ -33,8 +33,9 @@ export function projLabel(p: string | null): string {
   return parts[parts.length - 1] ?? p;
 }
 
-/** Git-style short id: `claude-code:<uuid>` → `cc·<first8>`; gemini `session-…` stems
- *  collapse to their trailing hash. `lookupId` accepts these back as jump targets. */
+/** Git-style short id: `claude-code:<uuid>` → `cc:<first8>`; gemini `session-…` stems
+ *  collapse to their trailing hash. Separator is a plain colon — it must be typeable
+ *  (`·` isn't on a keyboard); resolvers accept both `:` and legacy `·` forms. */
 export function shortId(id: string): string {
   const i = id.indexOf(":");
   const agent = i < 0 ? "" : id.slice(0, i);
@@ -46,5 +47,5 @@ export function shortId(id: string): string {
     : agent === "antigravity" ? "agy"
     : agent;
   const core = native.startsWith("session-") ? native.split("-").pop() || native : native;
-  return `${a}·${core.slice(0, 8)}`;
+  return `${a}:${core.slice(0, 8)}`;
 }

@@ -199,6 +199,37 @@ mark {
 
 .loading { color: var(--dim-2); padding: 16px; }
 
+/* ── Kumo portal stacking + tooltip/flyout fixes ─────────────────────────────
+   Kumo/Base UI popups mount in unclassed absolute positioners with z-index:auto,
+   which our sticky chrome (.sidebar-top z:2, .detail-head z:1) painted over —
+   tooltips looked "cut off" and the flyout slid under the filter chips. */
+div:has(> .menu-panel),
+div:has(> .tip) { z-index: 60; }
+.menu-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+}
+/* our tooltips (Kumo Tooltip className="tip"): black, white text, above everything */
+.tip {
+  background: #23272f !important;
+  color: #fff !important;
+  border: none !important;
+  font-size: 11px;
+}
+
+/* rows can be anchors (id-jump deep link) */
+a.row { text-decoration: none; color: inherit; }
+
+/* clickable meta values (project → filter) */
+.linklike { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.linklike:hover { text-decoration: underline; }
+a.sid { text-decoration: none; }
+a.sid:hover { color: var(--accent); }
+
+/* browse-sort order toggle + active project chip */
+.orderbtn, .projchip { display: inline-flex; align-items: center; gap: 4px; }
+
 /* ── delete dialog (Kumo Dialog owns backdrop/panel; we lay out its body) ──── */
 .modal-title { font-size: 16px; font-weight: 700; margin: 0 0 8px; }
 .modal-desc { color: var(--dim); font-size: 13px; margin: 0 0 14px; }

@@ -38,6 +38,7 @@ function IconButton({
     <Tooltip
       content={label}
       side="bottom"
+      className="tip"
       render={
         <button className={className ?? "iconbtn"} aria-label={label} onClick={onClick}>
           {children}
@@ -100,12 +101,14 @@ function DetailHead({
   expandAll,
   onToggleExpand,
   onDeleted,
+  onProjectClick,
 }: {
   session: any;
   resumeCommand: string | null;
   expandAll: boolean;
   onToggleExpand(): void;
   onDeleted(): void;
+  onProjectClick(project: string): void;
 }) {
   const qc = useQueryClient();
   const s = session;
@@ -208,8 +211,15 @@ function DetailHead({
         </div>
       </div>
       <div className="dh-meta">
-        <span title={s.projectPath ?? ""}>
-          <span className="k">project</span> {projLabel(s.projectPath)}
+        <span title={s.projectPath ? `${s.projectPath} — click to filter the list` : ""}>
+          <span className="k">project</span>{" "}
+          {s.projectPath ? (
+            <button className="linklike" onClick={() => onProjectClick(s.projectPath)}>
+              {projLabel(s.projectPath)}
+            </button>
+          ) : (
+            projLabel(s.projectPath)
+          )}
         </span>
         <span>
           <span className="k">turns</span> {s.turnCount ?? 0}
@@ -223,10 +233,18 @@ function DetailHead({
         <span>
           <span className="k">updated</span> {fmtRel(s.updatedAt)}
         </span>
-        <span className="sid" title={`${s.id} — click to copy`} onClick={() => copy(s.id, "id")}>
+        <a
+          className="sid"
+          href={`?s=${encodeURIComponent(s.id)}`}
+          title={`${s.id} — click to copy a link to this session`}
+          onClick={(e) => {
+            e.preventDefault(); // plain click copies the deep link; cmd-click opens it
+            copy(`${location.origin}${location.pathname}?s=${encodeURIComponent(s.id)}`, "link");
+          }}
+        >
           {shortId(s.id)}
-          {copied === "id" ? " ✓" : ""}
-        </span>
+          {copied === "link" ? " ✓ link copied" : ""}
+        </a>
       </div>
       <ConfirmDelete
         name={s.name}
@@ -247,11 +265,13 @@ export function Detail({
   targetMsgId,
   highlight,
   onDeleted,
+  onProjectClick,
 }: {
   id: string | null;
   targetMsgId: number | null;
   highlight: string;
   onDeleted(): void;
+  onProjectClick(project: string): void;
 }) {
   const [expandAll, setExpandAll] = useState(false);
   const [resetTick, setResetTick] = useState(0);
@@ -290,6 +310,7 @@ export function Detail({
           setResetTick((t) => t + 1);
         }}
         onDeleted={onDeleted}
+        onProjectClick={onProjectClick}
       />
       <MessageList messages={data.messages} highlight={highlight} expandAll={expandAll} resetTick={resetTick} />
     </div>

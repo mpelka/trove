@@ -42,6 +42,7 @@ const listInput = z
     tag: z.string().optional(),
     includeHidden: z.boolean().optional(),
     sort: z.enum(["updated", "created", "name", "turns"]).optional(),
+    order: z.enum(["asc", "desc"]).optional(),
     limit: z.number().int().positive().max(500).optional(),
   })
   .optional();
