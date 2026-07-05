@@ -1,12 +1,14 @@
 /**
  * Drizzle typed table definitions for the trove SQLite store.
  *
- * These mirror the physical columns/types/PKs/defaults declared in SCHEMA_SQL (schema.ts)
- * and the `*Row` interfaces there. They are used for typed QUERIES only.
+ * These mirror the physical columns/types/PKs/defaults of the `*Row` interfaces in schema.ts.
+ * They are used for typed QUERIES *and* are the source `drizzle-kit generate` diffs to emit
+ * migrations (issue #19).
  *
- * NOTE (issue #19): SCHEMA_SQL is still the source of truth that CREATEs the tables (incl. the
- * FTS5 virtual table + triggers, which Drizzle can't express). This file is a temporary dual
- * definition — #19 will unify table creation + typed access under drizzle-kit migrations.
+ * NOTE: the FTS5 virtual table `messages_fts` and its triggers can't be expressed here; they
+ * are created + maintained by hand inside the baseline migration (packages/core/drizzle) and
+ * are outside drizzle-kit's model, so `generate` never touches them. Keep the columns here in
+ * lockstep with the physical schema — a `generate` run turns any drift into a migration.
  *
  * Booleans are stored as 0/1 integers (kept raw, no drizzle boolean mode). JSON columns
  * (agent_specific, tags) are plain TEXT — JSON.stringify/parse stays at the call boundary.
