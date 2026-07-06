@@ -261,7 +261,19 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 /* ── ghostwriter summary (issue #17) ──────────────────────────────────────── */
 @keyframes trove-spin { to { transform: rotate(360deg); } }
 .spin { animation: trove-spin 0.9s linear infinite; }
-.ghost-error { margin-top: 8px; color: var(--danger); font-size: 12px; }
+/* ghostwriter error: friendly headline + collapsible raw detail (not a raw dump) */
+.ghost-error { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); padding: 8px 10px; font-size: 12px; }
+.ghost-error-head { display: flex; align-items: center; gap: 6px; color: var(--danger); font-weight: 600; }
+.ghost-error-icon { flex: none; }
+.ghost-error-title { flex: 1; min-width: 0; }
+.ghost-error-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: none; background: transparent; color: var(--dim-2); cursor: pointer; border-radius: 5px; }
+.ghost-error-x:hover { color: var(--text); }
+.ghost-error-hint { margin: 6px 0 0; color: var(--dim); }
+.ghost-error-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 0; background: transparent; border: none; color: var(--dim-2); cursor: pointer; font-size: 11px; }
+.ghost-error-toggle:hover { color: var(--text); }
+.ghost-error-detail { margin: 6px 0 0; max-height: 180px; overflow: auto; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px; padding: 8px; font-family: var(--mono); font-size: 11px; line-height: 1.45; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* highlighted-text quote inside the remove-highlight confirm dialog */
+.confirm-quote { display: block; margin-top: 10px; padding: 6px 10px; border-left: 3px solid light-dark(oklch(72% 0.15 92), oklch(62% 0.13 92)); color: var(--text); font-size: 12px; max-height: 120px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ghost-card { margin-top: 10px; background: var(--accent-soft); border: 1px solid var(--border-soft); border-radius: 12px; padding: 8px 14px 10px; }
 .ghost-head { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; }
 .ghost-toggle { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 12px; font-weight: 600; }

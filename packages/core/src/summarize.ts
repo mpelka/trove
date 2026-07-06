@@ -28,6 +28,20 @@ export type SummarizeResult =
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+/** Tidy a summarizer's stderr for display: strip ANSI colour codes, drop blank lines, and
+ *  cap the length so an auth blow-up (e.g. a full OAuth stack dump) doesn't flood the UI. */
+function cleanError(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  const stripped = raw
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length > 0)
+    .join("\n")
+    .trim();
+  return stripped.length > 1200 ? `${stripped.slice(0, 1200)}\n…(truncated)` : stripped;
+}
+
 export function getSummary(db: Database, id: string): Summary | null {
   const d = drizzle(db);
   const row = d
@@ -105,8 +119,8 @@ export async function summarizeSession(
   }
 
   if (exitCode !== 0) {
-    const detail = stderr.trim() || `exit code ${exitCode}`;
-    return { ok: false, error: `summarizer exited non-zero: ${detail}` };
+    const detail = cleanError(stderr) || `exit code ${exitCode}`;
+    return { ok: false, error: detail };
   }
   const text = stdout.trim();
   if (!text) return { ok: false, error: "summarizer produced no output" };

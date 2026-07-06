@@ -13,8 +13,10 @@ import {
   RefreshCw,
   X,
   ChevronRight,
+  ChevronDown,
   PanelRight,
   PanelRightOpen,
+  AlertTriangle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -107,6 +109,60 @@ function ConfirmDelete({
   );
 }
 
+// ── generic confirm dialog (Kumo) — used for highlight removal from both the ────
+//    inline mark click and the info-panel ✕, so the two paths behave identically.
+function ConfirmDialog({
+  open,
+  title,
+  body,
+  confirmLabel,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  body?: ReactNode;
+  confirmLabel: string;
+  onOpenChange(open: boolean): void;
+  onConfirm(): void;
+}) {
+  return (
+    <Dialog.Root role="alertdialog" open={open} onOpenChange={onOpenChange}>
+      <Dialog size="sm" className="modal">
+        <Dialog.Title className="modal-title">{title}</Dialog.Title>
+        {body && <Dialog.Description className="modal-desc">{body}</Dialog.Description>}
+        <div className="modal-actions">
+          <Dialog.Close render={<Button variant="secondary">Cancel</Button>} />
+          <Button variant="destructive" icon={<Trash2 size={13} />} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </Dialog>
+    </Dialog.Root>
+  );
+}
+
+// ── ghostwriter error (friendly headline + collapsible raw detail) ────────────
+function SummaryError({ error, onDismiss }: { error: string; onDismiss(): void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ghost-error">
+      <div className="ghost-error-head">
+        <AlertTriangle size={13} className="ghost-error-icon" />
+        <span className="ghost-error-title">Couldn’t generate the summary</span>
+        <button className="ghost-error-x" aria-label="dismiss" onClick={onDismiss}>
+          <X size={12} />
+        </button>
+      </div>
+      <p className="ghost-error-hint">The summarizer command failed — check its auth or the command in your trove config.</p>
+      <button className="ghost-error-toggle" onClick={() => setOpen((v) => !v)}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />} details
+      </button>
+      {open && <pre className="ghost-error-detail">{error}</pre>}
+    </div>
+  );
+}
+
 // ── ghostwriter summary card (issue #17) ─────────────────────────────────────
 function SummaryCard({
   summary,
@@ -158,6 +214,7 @@ function InfoPanel({
   session,
   summary,
   summaryError,
+  onDismissError,
   summarizing,
   onSummarize,
   onRemoveSummary,
@@ -170,6 +227,7 @@ function InfoPanel({
   session: any;
   summary: { text: string; createdAt: number } | null;
   summaryError: string | null;
+  onDismissError(): void;
   summarizing: boolean;
   onSummarize(force: boolean): void;
   onRemoveSummary(): void;
@@ -262,7 +320,7 @@ function InfoPanel({
                 </IconButton>
               )}
             </div>
-            {summaryError && <div className="ghost-error">{summaryError}</div>}
+            {summaryError && <SummaryError error={summaryError} onDismiss={onDismissError} />}
             {summary ? (
               <SummaryCard
                 summary={summary}
@@ -501,7 +559,11 @@ function useHighlightSelection(rootRef: React.RefObject<HTMLDivElement | null>) 
       setPending({
         x: rect.left + rect.width / 2,
         y: rect.top,
-        text: sel.toString(), // verbatim, not trimmed — exact source of truth
+        // Trim edge whitespace: a triple-click (select-paragraph) appends a trailing
+        // newline that isn't in the rendered text node, which would break the exact
+        // inline mark (the highlight would save but never render in the body). Inner
+        // whitespace is preserved so the match against the source text stays exact.
+        text: sel.toString().trim(),
         messageUid: msg.getAttribute("data-uid") || null,
         messageSeq: Number(msg.getAttribute("data-seq")),
       });
@@ -550,6 +612,7 @@ export function Detail({
   const [expandAll, setExpandAll] = useState(false);
   const [resetTick, setResetTick] = useState(0);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<number | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const { pending, clear } = useHighlightSelection(messagesRef);
   const { data, isLoading } = useQuery({
@@ -621,14 +684,19 @@ export function Detail({
     if (msg) jumpToMessage(msg.id);
   };
 
-  // Clicking an existing highlight mark removes it (discoverable via its remove-cursor).
+  // Clicking an existing highlight mark asks to remove it (same confirm dialog the info
+  // panel's ✕ uses, so both paths behave identically).
   const onMessagesClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     const mark = target.closest?.("mark.hl") as HTMLElement | null;
     if (!mark) return;
     const hid = Number(mark.getAttribute("data-hl-id"));
-    if (hid && confirm("Remove this highlight?")) mRemove.mutate(hid);
+    if (hid) setPendingRemove(hid);
   };
+
+  // Text of the highlight awaiting removal (for the confirm dialog's quote).
+  const pendingRemoveText =
+    pendingRemove != null ? data?.highlights.find((h) => h.id === pendingRemove)?.text ?? null : null;
 
   if (!id) return <div className="detail-empty">Select a session to read it.</div>;
   if (isLoading || !data)
@@ -691,17 +759,36 @@ export function Detail({
             session={data.session}
             summary={data.summary}
             summaryError={summaryError}
+            onDismissError={() => setSummaryError(null)}
             summarizing={mSummarize.isPending}
             onSummarize={summarize}
             onRemoveSummary={() => mRemoveSummary.mutate()}
             summarizerAvailable={summarizerAvailable}
             highlights={data.highlights}
             onJumpHighlight={jumpToHighlight}
-            onRemoveHighlight={(hid) => mRemove.mutate(hid)}
+            onRemoveHighlight={(hid) => setPendingRemove(hid)}
             onProjectClick={onProjectClick}
           />
         </>
       )}
+      <ConfirmDialog
+        open={pendingRemove != null}
+        title="Remove highlight?"
+        body={
+          <>
+            This removes the saved highlight. The conversation text is unchanged.
+            {pendingRemoveText && <span className="confirm-quote">“{pendingRemoveText}”</span>}
+          </>
+        }
+        confirmLabel="Remove"
+        onOpenChange={(o) => {
+          if (!o) setPendingRemove(null);
+        }}
+        onConfirm={() => {
+          if (pendingRemove != null) mRemove.mutate(pendingRemove);
+          setPendingRemove(null);
+        }}
+      />
     </>
   );
 }

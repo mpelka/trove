@@ -91,12 +91,24 @@ describe("summarizeSession", () => {
     if (forced.ok) expect(forced.summary.text).toBe("DIFFERENT");
   });
 
-  it("returns a typed error on non-zero exit", async () => {
+  it("returns a typed error on non-zero exit, surfacing cleaned stderr (ANSI stripped)", async () => {
+    // The command fails and prints a coloured auth error to stderr; the result should carry
+    // the human-readable cause (so the UI can show it) with ANSI escapes removed.
+    writeConfig(`sh -c 'printf "\\033[31mauth failed: token expired\\033[0m\\n" >&2; exit 3'`);
+    const r = await summarizeSession(db, ID);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toContain("auth failed: token expired");
+      expect(r.error).not.toContain("["); // ANSI stripped
+    }
+    expect(getSummary(db, ID)).toBeNull();
+  });
+
+  it("falls back to an exit-code message when a non-zero exit prints nothing", async () => {
     writeConfig(`sh -c 'exit 3'`);
     const r = await summarizeSession(db, ID);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain("non-zero");
-    expect(getSummary(db, ID)).toBeNull();
+    if (!r.ok) expect(r.error).toContain("exit code 3");
   });
 
   it("returns a typed error on empty output", async () => {

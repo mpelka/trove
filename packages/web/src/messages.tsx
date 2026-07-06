@@ -135,7 +135,9 @@ export const MessageList = memo(function MessageList(props: {
       else if (h.messageSeq != null) mid = seqToId.get(h.messageSeq);
       if (mid == null) continue; // orphaned highlight — nothing to mark in this session
       const arr = map.get(mid) ?? [];
-      arr.push({ id: h.id, text: h.text });
+      // Trim edge whitespace so highlights saved before the capture-side trim (e.g. a
+      // triple-click's trailing newline) still match a rendered text node and mark inline.
+      arr.push({ id: h.id, text: h.text.trim() });
       map.set(mid, arr);
     }
     return map;
