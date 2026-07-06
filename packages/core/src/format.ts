@@ -26,6 +26,7 @@ export const agentLabel = (a: string) =>
   : a === "copilot" ? "COP"
   : a === "antigravity" ? "AGY"
   : a === "chatgpt" ? "GPT"
+  : a === "claude-web" ? "CW"
   : a;
 
 export function projLabel(p: string | null): string {
@@ -47,6 +48,7 @@ export function shortId(id: string): string {
     : agent === "copilot" ? "cop"
     : agent === "antigravity" ? "agy"
     : agent === "chatgpt" ? "gpt"
+    : agent === "claude-web" ? "cw"
     : agent;
   const core = native.startsWith("session-") ? native.split("-").pop() || native : native;
   return `${a}:${core.slice(0, 8)}`;

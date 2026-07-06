@@ -44,19 +44,24 @@ bun run trove status    # see the per-agent counts
 If an agent you use shows **0 sessions**, its store isn't where trove looks by default —
 tell me the path and we'll point the adapter at it.
 
-### Importing webapp exports (ChatGPT)
+### Importing webapp exports (ChatGPT + claude.ai)
 
-Sessions from the **ChatGPT web app** are imported from an official data export:
+Sessions from the **ChatGPT** and **claude.ai** web apps are imported from their official data
+exports:
 
-1. In ChatGPT: Settings → Data controls → Export data. You'll get a `.zip` by email.
-2. Unzip it into **`~/.trove/imports/`** (any subfolder, e.g. `~/.trove/imports/chatgpt/`).
+1. Request an export:
+   - **ChatGPT**: Settings → Data controls → Export data.
+   - **claude.ai**: Settings → Privacy → Export data.
+   You'll get a `.zip` by email in each case.
+2. Unzip it into **`~/.trove/imports/`** (any subfolder, e.g. `~/.trove/imports/chatgpt/` or
+   `~/.trove/imports/claude/`).
 3. Run `bun run trove sync`.
 
-They show up as the **`chatgpt`** agent (its own filter chip). Re-running an export later and
-re-syncing updates changed conversations and adds new ones. Image/file attachments are imported
-as text references (`[image: name.png]`), not the binaries.
-
-> claude.ai web export import is still on the roadmap. This all runs locally — no upload.
+They show up as their own agents — **`chatgpt`** and **`claude-web`** (chip labelled "claude.ai",
+distinct from "claude" which is Claude Code). Re-exporting later and re-syncing updates changed
+conversations and adds new ones. Empty/contentless conversations are skipped; image and file
+attachments are imported as text references (`[image: name.png]`, `[attachment: name]`), never the
+binaries. It all runs locally — nothing is uploaded.
 
 ## 4. The GUI
 

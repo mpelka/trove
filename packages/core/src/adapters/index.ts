@@ -4,6 +4,7 @@ import { geminiCliAdapter } from "./gemini-cli.ts";
 import { copilotAdapter } from "./copilot.ts";
 import { antigravityAdapter } from "./antigravity.ts";
 import { chatgptWebAdapter } from "./chatgpt-web.ts";
+import { claudeWebAdapter } from "./claude-web.ts";
 
 /** All registered adapters. New agents are added here — nothing above this line changes. */
 export const adapters: Adapter[] = [
@@ -12,6 +13,7 @@ export const adapters: Adapter[] = [
   copilotAdapter,
   antigravityAdapter,
   chatgptWebAdapter,
+  claudeWebAdapter,
 ];
 
 export function getAdapter(agentId: string): Adapter | undefined {
@@ -25,4 +27,5 @@ export {
   copilotAdapter,
   antigravityAdapter,
   chatgptWebAdapter,
+  claudeWebAdapter,
 };

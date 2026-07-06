@@ -177,6 +177,9 @@ export function Sidebar(props: {
           <button className={`chip${agent === "chatgpt" ? " on" : ""}`} onClick={() => setAgent("chatgpt")}>
             chatgpt
           </button>
+          <button className={`chip${agent === "claude-web" ? " on" : ""}`} onClick={() => setAgent("claude-web")}>
+            claude.ai
+          </button>
           <button className={`chip star${starOnly ? " on" : ""}`} onClick={() => setStarOnly((v) => !v)}>
             <Star size={12} fill={starOnly ? "currentColor" : "none"} /> starred
           </button>
