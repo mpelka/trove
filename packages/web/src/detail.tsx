@@ -550,11 +550,17 @@ function useHighlightSelection(rootRef: React.RefObject<HTMLDivElement | null>) 
       const text = sel.toString().trim();
       if (!text) return void setPending(null);
       const range = sel.getRangeAt(0);
-      const container = range.commonAncestorContainer;
-      const node = container.nodeType === 1 ? (container as Element) : container.parentElement;
-      const msg = node?.closest?.(".msg");
-      // must be a single .msg inside our messages pane, and a chat message (has data-seq)
-      if (!msg || !root.contains(msg) || !msg.hasAttribute("data-seq")) return void setPending(null);
+      // Resolve the enclosing chat message from the selection's ENDPOINTS, not its
+      // commonAncestorContainer: a triple-click (select-paragraph) often reports a CAC
+      // that bubbles above the `.msg` (to `.md`/`.messages`), which previously suppressed
+      // the popover entirely. Both endpoints must land in the SAME chat message.
+      const msgOf = (n: Node): Element | null =>
+        (n.nodeType === 1 ? (n as Element) : n.parentElement)?.closest?.(".msg[data-seq]") ?? null;
+      const startMsg = msgOf(range.startContainer);
+      const endMsg = msgOf(range.endContainer);
+      if (startMsg && endMsg && startMsg !== endMsg) return void setPending(null); // spans messages
+      const msg = startMsg ?? endMsg;
+      if (!msg || !root.contains(msg)) return void setPending(null);
       const rect = range.getBoundingClientRect();
       setPending({
         x: rect.left + rect.width / 2,

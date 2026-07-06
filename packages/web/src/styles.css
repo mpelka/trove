@@ -42,7 +42,10 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
-.app { display: flex; flex-direction: column; height: 100%; }
+/* isolation: contain the sticky header's z-index inside .app so the body-level Kumo
+   dialog portal (backdrop + modal) always paints above it — otherwise the positive-z
+   header bleeds over the modal backdrop (both share the root stacking context). */
+.app { display: flex; flex-direction: column; height: 100%; isolation: isolate; }
 
 /* Header: settings menu + brand + search */
 .header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -382,6 +385,8 @@ a.sid:hover { color: var(--accent); }
 .orderbtn, .projchip { display: inline-flex; align-items: center; gap: 4px; }
 
 /* ── delete dialog (Kumo Dialog owns backdrop/panel; we lay out its body) ──── */
+/* Kumo's Dialog panel ships without inner padding — add our own so content isn't flush. */
+.modal { padding: 20px 22px 18px; }
 .modal-title { font-size: 16px; font-weight: 700; margin: 0 0 8px; }
 .modal-desc { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
 .modal-check { margin-bottom: 18px; font-size: 12px; }
