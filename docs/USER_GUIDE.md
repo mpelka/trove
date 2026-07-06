@@ -44,8 +44,19 @@ bun run trove status    # see the per-agent counts
 If an agent you use shows **0 sessions**, its store isn't where trove looks by default —
 tell me the path and we'll point the adapter at it.
 
-> Note on webapp exports (claude.ai / ChatGPT): those are a *separate* feature (still on the
-> roadmap). This guide covers your **local CLI** sessions, which sync reads directly.
+### Importing webapp exports (ChatGPT)
+
+Sessions from the **ChatGPT web app** are imported from an official data export:
+
+1. In ChatGPT: Settings → Data controls → Export data. You'll get a `.zip` by email.
+2. Unzip it into **`~/.trove/imports/`** (any subfolder, e.g. `~/.trove/imports/chatgpt/`).
+3. Run `bun run trove sync`.
+
+They show up as the **`chatgpt`** agent (its own filter chip). Re-running an export later and
+re-syncing updates changed conversations and adds new ones. Image/file attachments are imported
+as text references (`[image: name.png]`), not the binaries.
+
+> claude.ai web export import is still on the roadmap. This all runs locally — no upload.
 
 ## 4. The GUI
 
