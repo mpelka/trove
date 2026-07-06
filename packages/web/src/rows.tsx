@@ -1,4 +1,4 @@
-import { Star, Asterisk, Sparkle, Bot, Orbit } from "lucide-react";
+import { Star, Asterisk, Sparkle, Bot, Orbit, MessageCircle } from "lucide-react";
 import { Badge } from "@cloudflare/kumo";
 import { fmtRel, agentClass, agentLabel, projLabel } from "./lib.ts";
 
@@ -8,11 +8,13 @@ export function Snippet({ text }: { text: string }) {
 }
 
 // Agent marker: a small round, tinted logo per agent. Generic glyphs (not the official
-// trademarked logos): claude=asterisk, gemini=sparkle, copilot=bot, antigravity=orbit.
+// trademarked logos): claude=asterisk, gemini=sparkle, copilot=bot, antigravity=orbit,
+// chatgpt=message-circle.
 export const AgentIcon = ({ agent }: { agent: string }) =>
   agent === "claude-code" ? <Asterisk size={15} strokeWidth={2.6} />
   : agent === "gemini-cli" ? <Sparkle size={13} strokeWidth={2.1} />
   : agent === "antigravity" ? <Orbit size={13} strokeWidth={2.1} />
+  : agent === "chatgpt" ? <MessageCircle size={13} strokeWidth={2.1} />
   : <Bot size={13} strokeWidth={2.1} />;
 
 export function AgentBadge({ agent }: { agent: string }) {

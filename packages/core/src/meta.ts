@@ -23,7 +23,7 @@ export function resolveSessionId(db: Database, ref: string): ResolveResult {
   // Strip a short-id agent prefix (same forms lookupId accepts). `cc·73da3fd6` →
   // candidate core "73da3fd6"; gemini short ids are the TRAILING hash of the
   // `session-…` native id, so match those with a suffix-friendly LIKE too.
-  const m = ref.match(/^(cc|gem|cop|agy|claude-code|gemini-cli|copilot|antigravity)[·:](.+)$/i);
+  const m = ref.match(/^(cc|gem|cop|agy|gpt|claude-code|gemini-cli|copilot|antigravity|chatgpt)[·:](.+)$/i);
   const candidates = m ? [ref, m[2]] : [ref];
 
   const seen = new Map<string, true>();

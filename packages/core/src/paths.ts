@@ -16,6 +16,12 @@ export function archiveDir(): string {
   return join(troveDir(), "archive");
 }
 
+/** Drop-zone for imported web exports (e.g. ChatGPT). Deliberately NOT created by
+ *  ensureDirs() — the chatgpt adapter must tolerate its absence (returns [] when missing). */
+export function importsDir(): string {
+  return join(troveDir(), "imports");
+}
+
 export function ensureDirs(): void {
   mkdirSync(troveDir(), { recursive: true });
   mkdirSync(archiveDir(), { recursive: true });

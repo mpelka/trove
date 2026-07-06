@@ -11,6 +11,7 @@ export const agentClass = (a: string) =>
   : a === "gemini-cli" ? "gemini"
   : a === "copilot" ? "copilot"
   : a === "antigravity" ? "agy"
+  : a === "chatgpt" ? "chatgpt"
   : "";
 
 export function escapeRegExp(s: string) {

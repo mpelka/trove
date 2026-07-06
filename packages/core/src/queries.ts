@@ -207,7 +207,7 @@ export function lookupId(db: Database, raw: string): IdHit | null {
   if (exact) return { sessionId: exact.id, messageId: null, kind: "session" };
 
   // strip a short-id agent prefix: "cc·7de4", "gem:abc", "cop·…", "agy·…", full agent ids
-  const m = q.match(/^(?:cc|gem|cop|agy|claude-code|gemini-cli|copilot|antigravity)[·:](.+)$/i);
+  const m = q.match(/^(?:cc|gem|cop|agy|gpt|claude-code|gemini-cli|copilot|antigravity|chatgpt)[·:](.+)$/i);
   const core = m ? m[1] : q;
 
   const byUid = d
