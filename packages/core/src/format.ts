@@ -50,6 +50,9 @@ export function shortId(id: string): string {
     : agent === "chatgpt" ? "gpt"
     : agent === "claude-web" ? "cw"
     : agent;
-  const core = native.startsWith("session-") ? native.split("-").pop() || native : native;
+  // gemini native ids are `<project>/<stem>` (the stem alone isn't unique) — short-id off the
+  // stem, not the project, or every session in a project would collapse to the same `gem:…`.
+  const stem = native.slice(native.lastIndexOf("/") + 1);
+  const core = stem.startsWith("session-") ? stem.split("-").pop() || stem : stem;
   return `${a}:${core.slice(0, 8)}`;
 }

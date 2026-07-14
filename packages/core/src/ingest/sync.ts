@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { archiveDir } from "../paths.ts";
 import { setKv } from "../db/client.ts";
-import { sessions, messages, sessionMeta } from "../db/drizzle-schema.ts";
+import { sessions, messages, sessionMeta, highlights, summaries } from "../db/drizzle-schema.ts";
 import { tombstonedPaths, tombstonedIds } from "../curate.ts";
 import type { Adapter } from "../adapters/types.ts";
 
@@ -136,6 +136,30 @@ export async function sync(
         continue;
       }
       seenIds.add(id);
+
+      // Same source FILE, different id than the row already sitting at this path → the
+      // adapter's identity scheme changed (gemini moved from filename-stem to
+      // <project>/<stem> once stems turned out to collide across projects). One path is one
+      // session, so the old row is stale: re-point the user's sidecar data at the new id and
+      // drop it, rather than leaving a duplicate next to the new row forever.
+      if (existing && existing.id !== id) {
+        const stale = existing.id;
+        opts.onProgress?.(`  ~ re-identified ${stale} → ${id}`);
+        const migrate = db.transaction(() => {
+          d.delete(messages).where(eq(messages.sessionId, stale)).run();
+          // Sidecar tables are the user's own work — carry them over. Best-effort: a row
+          // may already exist under the new id, in which case the old one is redundant.
+          for (const t of [sessionMeta, highlights, summaries]) {
+            try {
+              d.update(t).set({ sessionId: id }).where(eq(t.sessionId, stale)).run();
+            } catch {
+              d.delete(t).where(eq(t.sessionId, stale)).run();
+            }
+          }
+          d.delete(sessions).where(eq(sessions.id, stale)).run();
+        });
+        migrate();
+      }
 
       const existingById = getById.get(id) as
         | { source_path: string; content_hash: string }

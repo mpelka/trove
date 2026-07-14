@@ -86,8 +86,9 @@ describe("geminiCliAdapter.parse", () => {
     expect(parsed).not.toBeNull();
     const s = parsed!.session;
 
-    // identity: filename stem, not the in-content sessionId
-    expect(s.nativeId).toBe("session-2025-06-01T10-00-abcd1234");
+    // identity: <project>/<stem> — NOT the bare stem (not unique across projects) and
+    // NOT the in-content sessionId (shared across resumes/subagents)
+    expect(s.nativeId).toBe("hash1/session-2025-06-01T10-00-abcd1234");
     expect(s.agentSpecific?.contentSessionId).toBe("gem-content-session-id");
     expect(s.projectPath).toBe("/Users/x/myproj"); // from .project_root sibling
     expect(s.model).toBe("gemini-2.5-pro");
@@ -256,10 +257,10 @@ describe("gemini-cli .jsonl (0.44.x mutation log)", () => {
     expect(r!.session.model).toBe("gemini-2.5-pro");
   });
 
-  it("strips the .jsonl extension from nativeId", async () => {
+  it("strips the .jsonl extension from nativeId (and scopes it to the project)", async () => {
     const p = writeSession("h-nid", "session-2026-07-09T11-18-0d4f9f0a.jsonl", [HDR("s"), MSG("m1", "user", "x"), MSG("m2", "gemini", "y")].join("\n"));
     const r = await geminiCliAdapter.parse(refFor(p));
-    expect(r!.session.nativeId).toBe("session-2026-07-09T11-18-0d4f9f0a");
+    expect(r!.session.nativeId).toBe("h-nid/session-2026-07-09T11-18-0d4f9f0a");
   });
 
   it("a re-emitted id edits that message in place, keeping its position", async () => {
@@ -294,5 +295,43 @@ describe("gemini-cli .jsonl (0.44.x mutation log)", () => {
     const p = writeSession("h-torn", "session-torn.jsonl", [HDR("s"), MSG("m1", "user", "good"), MSG("m2", "gemini", "also good"), '{"id":"m3","type":"user",'].join("\n"));
     const r = await geminiCliAdapter.parse(refFor(p));
     expect(r!.session.messages.map((m) => m.text)).toEqual(["good", "also good"]);
+  });
+});
+
+// ── identity: the filename stem is NOT unique ────────────────────────────────
+// Real store (work laptop): 4 projects each held `session-2026-06-17T14-10-a2a-serv`,
+// and one project held both a `.json` and a `.jsonl` of the same stem. Keying identity on
+// the stem silently dropped ~32 sessions as "duplicate session id".
+describe("gemini-cli session identity", () => {
+  it("same stem in different projects yields DISTINCT sessions (a2a-serv collision)", async () => {
+    const body = [HDR("s"), MSG("m1", "user", "hi"), MSG("m2", "gemini", "yo")].join("\n");
+    const a = writeSession("atl", "session-2026-06-17T14-10-a2a-serv.jsonl", body);
+    const b = writeSession("simulator", "session-2026-06-17T14-10-a2a-serv.jsonl", body);
+    const ra = await geminiCliAdapter.parse(refFor(a));
+    const rb = await geminiCliAdapter.parse(refFor(b));
+    expect(ra!.session.nativeId).toBe("atl/session-2026-06-17T14-10-a2a-serv");
+    expect(rb!.session.nativeId).toBe("simulator/session-2026-06-17T14-10-a2a-serv");
+    expect(ra!.session.nativeId).not.toBe(rb!.session.nativeId); // the whole point
+  });
+
+  it("prefers the .jsonl when a legacy .json twin sits beside it", async () => {
+    writeSession("twin", "session-2026-04-22T07-21-3ae2c125.json", { sessionId: "x", messages: [] });
+    writeSession("twin", "session-2026-04-22T07-21-3ae2c125.jsonl", [HDR("x"), MSG("m1", "user", "live log")].join("\n"));
+    const refs = await geminiCliAdapter.enumerate();
+    const twins = refs.filter((r) => r.path.includes("/twin/"));
+    expect(twins).toHaveLength(1); // not two — same conversation, two formats
+    expect(twins[0].path.endsWith(".jsonl")).toBe(true);
+  });
+
+  it("keeps every same-stem session across projects when enumerating", async () => {
+    const body = [HDR("s"), MSG("m1", "user", "hi"), MSG("m2", "gemini", "yo")].join("\n");
+    for (const p of ["p-one", "p-two", "p-three"]) writeSession(p, "session-2026-06-18T07-12-a2a-serv.jsonl", body);
+    const refs = await geminiCliAdapter.enumerate();
+    const ids = new Set<string>();
+    for (const r of refs.filter((x) => x.path.includes("a2a-serv") && /p-(one|two|three)/.test(x.path))) {
+      const parsed = await geminiCliAdapter.parse(r);
+      ids.add(parsed!.session.nativeId);
+    }
+    expect(ids.size).toBe(3); // three distinct ids → sync keeps all three
   });
 });

@@ -1,6 +1,6 @@
 import { Glob } from "bun";
 import { homedir } from "node:os";
-import { join, dirname, basename } from "node:path";
+import { join, dirname, basename, relative, sep } from "node:path";
 import { statSync, readFileSync } from "node:fs";
 import type {
   Adapter,
@@ -65,6 +65,26 @@ function extractUserText(content: unknown): string {
     if (typeof p.text === "string" && p.text.trim()) prose.push(p.text.trim());
   }
   return prose.join("\n\n");
+}
+
+/**
+ * Stable identity for a session file: `<project>/<stem>`, e.g. `projects-1/session-2026-04-22T07-21-3ae2c125`.
+ *
+ * The filename stem ALONE is not unique, despite looking like it should be. gemini names
+ * files `session-<timestamp-to-the-minute>-<first 8 chars of sessionId>`, so two sessions
+ * started in the same minute whose ids share a prefix collide — and agent-to-agent sessions
+ * all begin `a2a-serv`, so EVERY pair of them started in the same minute produces the same
+ * filename across different projects. Real-world store: 4 projects each holding
+ * `session-2026-06-17T14-10-a2a-serv`. Keying on the stem silently dropped all but the first.
+ *
+ * The in-content sessionId is no good either (it's shared across resumes/subagents), so the
+ * path is the identity — it's what actually distinguishes these files.
+ */
+function sessionKey(root: string, path: string): string {
+  const rel = relative(root, path);
+  const project = rel.split(sep)[0] || "_";
+  const stem = basename(path).replace(/\.jsonl?$/, "");
+  return `${project}/${stem}`;
 }
 
 /** Seed/append message records (objects carrying a string `id`) into the replay map. */
@@ -150,6 +170,11 @@ export const geminiCliAdapter: Adapter = {
     // The `session-` prefix also keeps out nested `chats/<id>/<id>.jsonl` skill/subagent
     // transcripts — internal noise, same as the CC adapter's subagent filter.
     const glob = new Glob("*/chats/session-*.{json,jsonl}");
+    // Keyed by <project>/<stem> — the session identity (see sessionKey). A 0.44 store can
+    // hold a legacy `session-X.json` NEXT TO its live `session-X.jsonl`; they're the same
+    // conversation in two formats, so take the .jsonl (the live log, and the only one with
+    // the full rewind history) and drop the twin rather than importing it twice.
+    const byKey = new Map<string, SourceRef>();
     try {
       for await (const rel of glob.scan({ cwd: root, onlyFiles: true })) {
         const path = join(root, rel);
@@ -159,7 +184,9 @@ export const geminiCliAdapter: Adapter = {
         } catch {
           continue;
         }
-        refs.push({
+        const key = sessionKey(root, path);
+        if (byKey.has(key) && !path.endsWith(".jsonl")) continue; // keep the .jsonl twin
+        byKey.set(key, {
           agent: this.agentId,
           medium: "file",
           path,
@@ -170,6 +197,7 @@ export const geminiCliAdapter: Adapter = {
     } catch {
       // tmp dir absent → no sessions
     }
+    refs.push(...byKey.values());
     return refs;
   },
 
@@ -268,7 +296,7 @@ export const geminiCliAdapter: Adapter = {
     // Identity is the filename stem (unique per file), NOT the in-content sessionId — which is
     // shared across resumes/subagents and would silently collapse+lose sessions (same lesson as
     // the CC adapter). The sessionId is kept in agentSpecific for later parent-grouping.
-    const nativeId = basename(ref.path).replace(/\.jsonl?$/, "");
+    const nativeId = sessionKey(tmpDir(), ref.path);
     const session: NormalizedSession = {
       nativeId,
       projectPath: resolveProjectFromFile(ref.path),

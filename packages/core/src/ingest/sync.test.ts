@@ -268,4 +268,36 @@ describe("sync", () => {
     const last = db.query("SELECT value FROM kv WHERE key = 'last_sync'").get() as any;
     expect(Number(last.value)).toBeGreaterThan(0);
   });
+
+  it("re-identifies a session in place when the adapter's id scheme changes", async () => {
+    // gemini's identity moved from filename-stem to <project>/<stem> once stems proved to
+    // collide across projects. A re-sync must NOT leave the old row beside the new one.
+    const { adapter, sources } = makeFake();
+    sources.push(source("fake", "old-id", [msg(0, "user", "hi"), msg(1, "assistant", "yo")]));
+    await sync(db, [adapter]);
+    expect(sessionRow("fake:old-id")).toBeDefined();
+
+    // the user curates it — this must survive the re-identification
+    setStar(db, "fake:old-id", true);
+    setName(db, "fake:old-id", "my important session");
+
+    // same FILE (same source path), new identity
+    sources[0].parsed!.session.nativeId = "proj/new-id";
+    const r = await sync(db, [adapter], { force: true });
+
+    expect(sessionRow("fake:old-id")).toBeNull(); // stale row gone, not duplicated
+    expect(sessionRow("fake:proj/new-id")).toBeDefined();
+    expect(r.added).toBe(1);
+    // one row per source path — the whole point
+    const atPath = db
+      .query("SELECT COUNT(*) n FROM sessions WHERE source_path = ?")
+      .get("/fake/old-id.jsonl") as any;
+    expect(atPath.n).toBe(1);
+    // curation carried over rather than being destroyed
+    const meta = db.query("SELECT * FROM session_meta WHERE session_id = ?").get("fake:proj/new-id") as any;
+    expect(meta?.starred).toBe(1);
+    expect(meta?.custom_name).toBe("my important session");
+    // and no messages orphaned under the stale id
+    expect(messageTexts("fake:old-id")).toEqual([]);
+  });
 });
