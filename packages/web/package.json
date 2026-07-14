@@ -12,7 +12,7 @@
     "@trove/core": "workspace:*",
     "@trpc/client": "^11.0.0",
     "@trpc/server": "^11.0.0",
-    "lucide-react": "^1.21.0",
+    "lucide-react": "1.16.0",
     "nuqs": "^2.8.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
