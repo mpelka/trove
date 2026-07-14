@@ -33,12 +33,13 @@ import {
 } from "@trove/core";
 import { writeFileSync } from "node:fs";
 import { c, fmtSize, fmtDate, fmtRelative, shortId, projectName } from "./format.ts";
+import { VERSION, versionString } from "./version.ts";
 
 const program = new Command();
 program
   .name("trove")
   .description("A local librarian, search engine, and archive for your CLI coding-agent sessions.")
-  .version("0.1.0");
+  .version(versionString());
 
 import { parseDate } from "./dates.ts";
 
@@ -212,8 +213,10 @@ program
     const ctx = openContext();
     try {
       const s = status(ctx.db);
-      if (opts.json) return void console.log(JSON.stringify(s, null, 2));
-      console.log(c.bold("trove status"));
+      // Version goes in --json too: `status` is the command you reach for on another
+      // machine to answer "what am I actually running here?".
+      if (opts.json) return void console.log(JSON.stringify({ version: VERSION, ...s }, null, 2));
+      console.log(c.bold("trove status") + c.dim(`  v${versionString()}`));
       console.log(`  sessions:  ${c.cyan(s.totalSessions)}   messages: ${c.cyan(s.totalMessages)}`);
       console.log(`  starred:   ${s.starred}   gone: ${s.gone}   db: ${fmtSize(s.dbSizeBytes)}`);
       console.log(`  last sync: ${s.lastSync ? fmtRelative(s.lastSync) : c.dim("never")}`);
