@@ -15,9 +15,9 @@ ghostwriter summarizer).
 
 ## 2. Install
 
-Unzip / clone the source, then from the project root:
-
 ```sh
+git clone https://github.com/mpelka/trove.git
+cd trove
 bun install
 ```
 
@@ -127,12 +127,14 @@ Short ids shown in the GUI/CLI (e.g. `cc:7de4…`, `agy:1bc8…`) are accepted a
 
 ## 7. Upgrading trove
 
-When you drop in a newer source zip:
-
 ```sh
+git pull
 bun install
 bun run trove status     # opening the store auto-applies any schema migrations
 ```
+
+`status` prints the version you're on (e.g. `v0.2.0 (2011875)`), so you can check that two
+machines actually match — `bun run trove --version` reports the same.
 
 Schema changes are handled by tracked migrations that run automatically — your existing
 `~/.trove/trove.db` is upgraded in place, nothing is lost. If a release changes **how sessions

@@ -13,10 +13,11 @@ const repoRootDir = fileURLToPath(new URL("../../../", import.meta.url));
 /**
  * Short git SHA of the working tree, or null when git metadata isn't there.
  *
- * This is a DEV convenience only, and deliberately best-effort: trove is installed on the
- * work laptop by copying/zipping the source, which drops `.git` — so this is null exactly
- * where you'd most want it. That's why releases are tagged: when git is gone, the tagged
- * VERSION is the only identity, so only ever ship from a tagged commit.
+ * trove is installed everywhere by cloning the (public) repo, so in practice this resolves
+ * on every machine — `--version` gives an exact identity, not just a release number, which
+ * is what you actually want when comparing two checkouts. The null path is a fallback for
+ * the rare gitless copy (a downloaded tarball, a `cp -r`), where the plain VERSION has to
+ * stand alone; that's the case tags exist for.
  */
 function gitSha(): string | null {
   try {
@@ -36,7 +37,7 @@ function gitSha(): string | null {
   }
 }
 
-/** `0.2.0 (75bec11)` in a checkout; plain `0.2.0` when shipped without git. */
+/** `0.2.0 (75bec11)` in a checkout; plain `0.2.0` in a gitless copy. */
 export function versionString(): string {
   const sha = gitSha();
   return sha ? `${VERSION} (${sha})` : VERSION;
