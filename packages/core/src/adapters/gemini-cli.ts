@@ -67,6 +67,72 @@ function extractUserText(content: unknown): string {
   return prose.join("\n\n");
 }
 
+/** Seed/append message records (objects carrying a string `id`) into the replay map. */
+function seedMessages(arr: unknown, into: Map<string, unknown>): void {
+  if (!Array.isArray(arr)) return;
+  for (const m of arr) {
+    if (m && typeof m === "object" && typeof (m as { id?: unknown }).id === "string") {
+      into.set((m as { id: string }).id, m);
+    }
+  }
+}
+
+/**
+ * Rebuild a session from a `.jsonl` log (gemini-cli 0.44.x).
+ *
+ * Unlike the `.json` format (0.49.x), which is a whole session document, a `.jsonl` is an
+ * append-only MUTATION LOG — you can't just parse it, you have to replay it. Record types,
+ * mirroring `loadConversationRecord` in @google/gemini-cli 0.44 (verified against the
+ * published bundle, not guessed):
+ *   - `{sessionId, projectHash, …}`  header  → merge into metadata; may carry `messages`
+ *   - `{id, …}`                      message → upsert into the map BY ID, so a re-emitted
+ *                                              id edits in place and order is insertion order
+ *   - `{$set: {...}}`                        → merge into metadata; a `messages` array here
+ *                                              REPLACES the whole map (clear + re-seed)
+ *   - `{$rewindTo: id}`              rewind  → drop that message and everything after it;
+ *                                              an unknown id clears the history entirely
+ *
+ * Returns the same shape the `.json` format has, so the parser downstream is format-agnostic.
+ */
+function replaySessionLog(text: string): Record<string, unknown> | null {
+  let metadata: Record<string, unknown> = {};
+  const messages = new Map<string, unknown>();
+  let sawRecord = false;
+
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let r: any;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue; // fail soft per line — a torn tail shouldn't lose the whole session
+    }
+    if (!r || typeof r !== "object") continue;
+    sawRecord = true;
+
+    if (typeof r.$rewindTo === "string") {
+      const ids = [...messages.keys()];
+      const idx = ids.indexOf(r.$rewindTo);
+      if (idx === -1) messages.clear();
+      else for (const id of ids.slice(idx)) messages.delete(id);
+    } else if (typeof r.id === "string") {
+      messages.set(r.id, r);
+    } else if (r.$set && typeof r.$set === "object") {
+      if (Array.isArray(r.$set.messages)) {
+        messages.clear();
+        seedMessages(r.$set.messages, messages);
+      }
+      metadata = { ...metadata, ...r.$set };
+    } else if (typeof r.sessionId === "string" && typeof r.projectHash === "string") {
+      metadata = { ...metadata, ...r };
+      seedMessages(r.messages, messages);
+    }
+  }
+  if (!sawRecord) return null;
+  // `messages` last: metadata may carry a stale copy from a $set spread.
+  return { ...metadata, messages: [...messages.values()] };
+}
+
 export const geminiCliAdapter: Adapter = {
   agentId: "gemini-cli",
 
@@ -77,9 +143,13 @@ export const geminiCliAdapter: Adapter = {
   async enumerate(): Promise<SourceRef[]> {
     const root = tmpDir();
     const refs: SourceRef[] = [];
-    // One JSON per session under ~/.gemini/tmp/<project>/chats/session-*.json.
-    // Some chats dirs are empty — that's fine, the glob just yields nothing there.
-    const glob = new Glob("*/chats/session-*.json");
+    // One session per file under ~/.gemini/tmp/<project>/chats/session-*.
+    // BOTH extensions: 0.49.x writes a whole-document `.json`, 0.44.x an append-only
+    // `.jsonl` mutation log. Machines run different gemini-cli generations, so support
+    // both rather than making the user configure it.
+    // The `session-` prefix also keeps out nested `chats/<id>/<id>.jsonl` skill/subagent
+    // transcripts — internal noise, same as the CC adapter's subagent filter.
+    const glob = new Glob("*/chats/session-*.{json,jsonl}");
     try {
       for await (const rel of glob.scan({ cwd: root, onlyFiles: true })) {
         const path = join(root, rel);
@@ -109,11 +179,17 @@ export const geminiCliAdapter: Adapter = {
     hasher.update(bytes);
     const contentHash = hasher.digest("hex");
 
+    const text = new TextDecoder().decode(bytes);
     let root: any;
-    try {
-      root = JSON.parse(new TextDecoder().decode(bytes));
-    } catch {
-      return null; // fail soft on a corrupt file
+    if (ref.path.endsWith(".jsonl")) {
+      // 0.44.x: an append-only mutation log — replay it into a session document.
+      root = replaySessionLog(text);
+    } else {
+      try {
+        root = JSON.parse(text);
+      } catch {
+        return null; // fail soft on a corrupt file
+      }
     }
     if (!root || typeof root !== "object") return null;
 
@@ -192,7 +268,7 @@ export const geminiCliAdapter: Adapter = {
     // Identity is the filename stem (unique per file), NOT the in-content sessionId — which is
     // shared across resumes/subagents and would silently collapse+lose sessions (same lesson as
     // the CC adapter). The sessionId is kept in agentSpecific for later parent-grouping.
-    const nativeId = basename(ref.path).replace(/\.json$/, "");
+    const nativeId = basename(ref.path).replace(/\.jsonl?$/, "");
     const session: NormalizedSession = {
       nativeId,
       projectPath: resolveProjectFromFile(ref.path),

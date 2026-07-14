@@ -218,3 +218,81 @@ describe("geminiCliAdapter.buildResumeCommand", () => {
     expect(cmd).toContain("gunzip -c '/a/b.json.gz'");
   });
 });
+
+// ── .jsonl mutation log (gemini-cli 0.44.x) ──────────────────────────────────
+// 0.44 writes an append-only log instead of 0.49's whole-document .json. Machines run
+// different generations (work is on 0.44), so both must parse. Record semantics mirror
+// loadConversationRecord in the published @google/gemini-cli 0.44 bundle.
+
+const HDR = (id: string) =>
+  JSON.stringify({ sessionId: id, projectHash: "abc123", startTime: "2026-06-19T11:44:00.000Z", lastUpdated: "2026-06-19T11:50:00.000Z", kind: null });
+const MSG = (id: string, type: "user" | "gemini", text: string) =>
+  JSON.stringify(
+    type === "user"
+      ? { id, timestamp: "2026-06-19T11:44:01.000Z", type, content: [{ text }] }
+      : { id, timestamp: "2026-06-19T11:44:09.000Z", type, content: text, thoughts: "hidden", model: "gemini-2.5-pro" },
+  );
+
+describe("gemini-cli .jsonl (0.44.x mutation log)", () => {
+  it("enumerate() finds .jsonl sessions alongside .json", async () => {
+    writeSession("h-mixed", "session-a.json", { sessionId: "a", messages: [] });
+    writeSession("h-mixed", "session-b.jsonl", HDR("b"));
+    const refs = await geminiCliAdapter.enumerate();
+    const names = refs.map((r) => r.path.split("/").pop());
+    expect(names).toContain("session-a.json");
+    expect(names).toContain("session-b.jsonl");
+  });
+
+  it("replays header + per-line message records into a session", async () => {
+    const p = writeSession("h-log", "session-log.jsonl", [HDR("s1"), MSG("m1", "user", "hello"), MSG("m2", "gemini", "hi there")].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r).not.toBeNull();
+    expect(r!.session.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "hello"],
+      ["assistant", "hi there"],
+    ]);
+    // metadata from the header line survives the replay
+    expect(r!.session.createdAt).toBe(Date.parse("2026-06-19T11:44:00.000Z"));
+    expect(r!.session.model).toBe("gemini-2.5-pro");
+  });
+
+  it("strips the .jsonl extension from nativeId", async () => {
+    const p = writeSession("h-nid", "session-2026-07-09T11-18-0d4f9f0a.jsonl", [HDR("s"), MSG("m1", "user", "x"), MSG("m2", "gemini", "y")].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.nativeId).toBe("session-2026-07-09T11-18-0d4f9f0a");
+  });
+
+  it("a re-emitted id edits that message in place, keeping its position", async () => {
+    const p = writeSession("h-edit", "session-edit.jsonl", [HDR("s"), MSG("m1", "user", "typo"), MSG("m2", "gemini", "reply"), MSG("m1", "user", "fixed")].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.text)).toEqual(["fixed", "reply"]);
+  });
+
+  it("$set.messages replaces the whole history (the real 2-line work shape)", async () => {
+    // Exactly what the work machine's files look like: a header, then one big $set.
+    const setLine = JSON.stringify({
+      $set: { lastUpdated: "2026-06-19T12:00:00.000Z", messages: [JSON.parse(MSG("x1", "user", "from set")), JSON.parse(MSG("x2", "gemini", "ok"))] },
+    });
+    const p = writeSession("h-set", "session-set.jsonl", [HDR("s"), MSG("gone", "user", "should be replaced"), setLine].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.text)).toEqual(["from set", "ok"]);
+  });
+
+  it("$rewindTo drops that message and everything after it", async () => {
+    const p = writeSession("h-rw", "session-rw.jsonl", [HDR("s"), MSG("m1", "user", "keep"), MSG("m2", "gemini", "drop me"), MSG("m3", "user", "drop me too"), JSON.stringify({ $rewindTo: "m2" }), MSG("m4", "gemini", "after rewind")].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.text)).toEqual(["keep", "after rewind"]);
+  });
+
+  it("$rewindTo an unknown id clears the history entirely", async () => {
+    const p = writeSession("h-rw2", "session-rw2.jsonl", [HDR("s"), MSG("m1", "user", "wiped"), JSON.stringify({ $rewindTo: "nope" }), MSG("m2", "user", "kept"), MSG("m3", "gemini", "kept too")].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.text)).toEqual(["kept", "kept too"]);
+  });
+
+  it("survives a torn/corrupt trailing line rather than losing the session", async () => {
+    const p = writeSession("h-torn", "session-torn.jsonl", [HDR("s"), MSG("m1", "user", "good"), MSG("m2", "gemini", "also good"), '{"id":"m3","type":"user",'].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.text)).toEqual(["good", "also good"]);
+  });
+});
