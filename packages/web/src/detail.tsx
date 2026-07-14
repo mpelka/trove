@@ -20,7 +20,11 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Dialog, Tooltip, Checkbox, Button, Badge } from "@cloudflare/kumo";
+import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogClose } from "./ui/dialog.tsx";
+import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
+import { Button } from "./ui/button.tsx";
+import { Badge } from "./ui/badge.tsx";
 import { trpc } from "./trpc.ts";
 import { fmtRel, fmtSize, projLabel, shortId } from "./lib.ts";
 import { AgentBadge } from "./rows.tsx";
@@ -35,8 +39,8 @@ async function copyText(t: string) {
   } catch {}
 }
 
-// Icon button with a Kumo Tooltip. `render` makes the trigger the button itself
-// (no extra wrapper element that would break the flex layout).
+// Icon button with a tooltip. `asChild` makes the trigger the button itself, so no
+// wrapper element lands in the surrounding flex row.
 function IconButton({
   label,
   className,
@@ -49,21 +53,18 @@ function IconButton({
   children: ReactNode;
 }) {
   return (
-    // NOTE: Tooltip's own className would merge onto the RENDER element (the button),
-    // so the popup is tagged via a span in `content` and styled through :has().
-    <Tooltip
-      content={<span className="tipin">{label}</span>}
-      side="bottom"
-      render={
+    <Tooltip>
+      <TooltipTrigger asChild>
         <button className={className ?? "iconbtn"} aria-label={label} onClick={onClick}>
           {children}
         </button>
-      }
-    />
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
-// ── delete dialog (Kumo Dialog + Checkbox) ───────────────────────────────────
+// ── delete dialog ────────────────────────────────────────────────────────────
 function ConfirmDelete({
   name,
   open,
@@ -81,17 +82,17 @@ function ConfirmDelete({
     if (open) setDeleteSource(false);
   }, [open]);
   return (
-    // role="alertdialog": destructive flow, not dismissible via outside click.
-    <Dialog.Root role="alertdialog" open={open} onOpenChange={onOpenChange}>
-      <Dialog size="sm" className="modal">
-        <Dialog.Title className="modal-title">Delete conversation?</Dialog.Title>
-        <Dialog.Description className="modal-desc">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* alert: destructive flow, so role="alertdialog" and no outside-click dismissal. */}
+      <DialogContent alert>
+        <DialogTitle className="modal-title">Delete conversation?</DialogTitle>
+        <DialogDescription className="modal-desc">
           Remove <b>{name}</b> from trove. It won't come back on the next sync.
-        </Dialog.Description>
+        </DialogDescription>
         <Checkbox
           className="modal-check"
           checked={deleteSource}
-          onCheckedChange={(v: boolean) => setDeleteSource(Boolean(v))}
+          onCheckedChange={(v) => setDeleteSource(v === true)}
           label={
             <>
               Also delete the original session file <span className="warn">(cannot be undone)</span>
@@ -99,18 +100,20 @@ function ConfirmDelete({
           }
         />
         <div className="modal-actions">
-          <Dialog.Close render={<Button variant="secondary">Cancel</Button>} />
+          <DialogClose asChild>
+            <Button variant="secondary">Cancel</Button>
+          </DialogClose>
           <Button variant="destructive" icon={<Trash2 size={13} />} onClick={() => onConfirm(deleteSource)}>
             Delete
           </Button>
         </div>
-      </Dialog>
-    </Dialog.Root>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-// ── generic confirm dialog (Kumo) — used for highlight removal from both the ────
-//    inline mark click and the info-panel ✕, so the two paths behave identically.
+// ── generic confirm dialog — used for highlight removal from both the inline ────
+//    mark click and the info-panel ✕, so the two paths behave identically.
 function ConfirmDialog({
   open,
   title,
@@ -127,18 +130,22 @@ function ConfirmDialog({
   onConfirm(): void;
 }) {
   return (
-    <Dialog.Root role="alertdialog" open={open} onOpenChange={onOpenChange}>
-      <Dialog size="sm" className="modal">
-        <Dialog.Title className="modal-title">{title}</Dialog.Title>
-        {body && <Dialog.Description className="modal-desc">{body}</Dialog.Description>}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Radix points aria-describedby at the Description's id by default; drop it when
+          there's no body, so it can't dangle at an element that was never rendered. */}
+      <DialogContent alert {...(body ? {} : { "aria-describedby": undefined })}>
+        <DialogTitle className="modal-title">{title}</DialogTitle>
+        {body && <DialogDescription className="modal-desc">{body}</DialogDescription>}
         <div className="modal-actions">
-          <Dialog.Close render={<Button variant="secondary">Cancel</Button>} />
+          <DialogClose asChild>
+            <Button variant="secondary">Cancel</Button>
+          </DialogClose>
           <Button variant="destructive" icon={<Trash2 size={13} />} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </div>
-      </Dialog>
-    </Dialog.Root>
+      </DialogContent>
+    </Dialog>
   );
 }
 

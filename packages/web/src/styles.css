@@ -1,36 +1,104 @@
-/* Tailwind v4 + Kumo, bundled by Bun via bun-plugin-tailwind.
-   Order matters: Tailwind first, then Kumo's @theme tokens + component CSS. */
+/* Tailwind v4, bundled by Bun via bun-plugin-tailwind. */
 @import "tailwindcss";
-@import "@cloudflare/kumo/styles/tailwind";
 
-/* Kumo ships precompiled component JS that references Tailwind utility
-   classes as strings. Tailwind's scanner ignores node_modules by default,
-   so tell it to scan Kumo's dist for the classes those components emit. */
-@source "../node_modules/@cloudflare/kumo/dist";
+/* ── design tokens ───────────────────────────────────────────────────────────
+   The palette is defined here rather than pulled from a component library, so
+   these literals ARE the source of truth. Everything — the plain-HTML app chrome
+   below and the vendored components in src/ui — reads from them, and both track
+   light/dark off `data-mode` on <html> (set pre-paint in index.html).
 
-/* ── app layout, styled with Kumo semantic tokens ────────────────────────────
-   Kumo owns the interactive widgets (Badge, Button, Tabs, Dialog, Checkbox,
-   Tooltip). Everything below is plain-HTML app chrome themed on Kumo tokens so
-   it tracks light/dark automatically via `data-mode` on <html>. */
+   color-scheme is load-bearing, not decoration: it drives light-dark() (used by
+   --user and the highlight marks) and the native form/scrollbar rendering. */
 :root {
+  color-scheme: light;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  /* Semantic aliases onto Kumo tokens, so the rules below read cleanly. */
-  --bg: var(--color-kumo-canvas);
-  --panel: var(--color-kumo-base);
-  --panel-2: var(--color-kumo-recessed);
-  --border: var(--color-kumo-line);
-  --border-soft: var(--color-kumo-hairline);
-  --text: var(--text-color-kumo-default);
-  --dim: var(--text-color-kumo-subtle);
-  --dim-2: var(--text-color-kumo-placeholder);
-  --accent: var(--color-kumo-brand);
-  --accent-soft: var(--color-kumo-tint);
-  --danger: var(--color-kumo-danger);
-  --star: var(--color-kumo-badge-orange);
+  --bg: oklch(98.75% 0 0);
+  --panel: #fff;
+  --panel-2: oklch(96.5% 0 0);
+  --border: oklch(14.5% 0 0 / 0.1);
+  --border-soft: oklch(93.5% 0 0);
+  --text: oklch(20.5% 0 0);
+  --dim: oklch(55.6% 0 0);
+  --dim-2: oklch(70.8% 0 0);
+  --accent: oklch(57.72% 0.2324 260);
+  --accent-soft: oklch(97% 0 0);
+  --danger: oklch(63.7% 0.237 25.331);
+  --star: oklch(81.5% 0.197 76);
+  /* component-only tokens: hairline outlines, and the near-black/near-white pair
+     a checked checkbox flips between (it inverts, rather than tinting). */
+  --fill: oklch(92.2% 0 0);
+  --contrast: oklch(8.5% 0 0);
+  --on-contrast: oklch(97% 0 0);
+  --badge-neutral: oklch(55.6% 0 0);
   /* role accents for message dots / who-lines (semantic, mode-aware) */
   --user: light-dark(oklch(58% 0.13 150), oklch(80% 0.16 145));
-  --assistant: var(--color-kumo-brand);
+  --assistant: var(--accent);
 }
+
+/* Only the values that actually differ in dark; --star and --user are mode-agnostic. */
+:root[data-mode="dark"] {
+  color-scheme: dark;
+  --bg: oklch(10% 0 0);
+  --panel: oklch(17% 0 0);
+  --panel-2: oklch(15% 0 0);
+  --border: oklch(32% 0 0);
+  --border-soft: oklch(26.9% 0 0);
+  --text: oklch(97% 0 0);
+  --dim: oklch(70.8% 0 0);
+  --dim-2: oklch(55.6% 0 0);
+  --accent: color-mix(in oklch, oklch(57.72% 0.2324 260), black 10%);
+  --accent-soft: oklch(26.9% 0 0);
+  --danger: oklch(57.7% 0.245 27.325);
+  --fill: oklch(26.9% 0 0);
+  --contrast: oklch(98.5% 0 0);
+  --on-contrast: oklch(20.5% 0 0);
+  --badge-neutral: oklch(43.9% 0 0);
+  --assistant: var(--accent);
+}
+
+/* Map Tailwind's colour utilities onto the palette above, so `bg-popover`,
+   `text-muted-foreground`, `ring-border` etc. inside src/ui resolve to our tokens
+   and follow dark mode with no per-component work. `inline` matters: it inlines the
+   var() reference into each utility, so the data-mode overrides above win.
+   This list is exactly what src/ui references — nothing speculative. */
+@theme inline {
+  --color-foreground: var(--text);
+  --color-muted: var(--panel-2);
+  --color-muted-foreground: var(--dim);
+  --color-popover: var(--panel);
+  --color-popover-foreground: var(--text);
+  --color-accent: var(--accent-soft);
+  --color-primary: var(--accent);
+  --color-border: var(--border);
+  --color-hairline: var(--border-soft);
+  --color-fill: var(--fill);
+  --color-contrast: var(--contrast);
+  --color-on-contrast: var(--on-contrast);
+  --color-badge-neutral: var(--badge-neutral);
+}
+
+/* Keep the compact type scale the component library used to set — the vendored
+   components are sized against it, and Tailwind's stock scale runs 2px larger. */
+@theme {
+  --text-xs: 12px;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-sm: 13px;
+  --text-sm--line-height: calc(1 / 0.85);
+  --text-base: 14px;
+  --text-base--line-height: calc(1.25 / 0.875);
+
+  /* Popup open/close motion (tooltip, popover, dialog). Radix drives these off
+     data-state and holds the element mounted until the close animation ends. */
+  --animate-pop-in: pop-in 150ms ease-out;
+  --animate-pop-out: pop-out 150ms ease-in;
+  --animate-fade-in: fade-in 150ms ease-out;
+  --animate-fade-out: fade-out 150ms ease-in;
+}
+
+@keyframes pop-in { from { scale: 0.9; opacity: 0; } }
+@keyframes pop-out { to { scale: 0.9; opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -42,7 +110,7 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
-/* isolation: contain the sticky header's z-index inside .app so the body-level Kumo
+/* isolation: contain the sticky header's z-index inside .app so the body-level
    dialog portal (backdrop + modal) always paints above it — otherwise the positive-z
    header bleeds over the modal backdrop (both share the root stacking context). */
 .app { display: flex; flex-direction: column; height: 100%; isolation: isolate; }
@@ -58,7 +126,7 @@ body {
 .header-search::placeholder { color: var(--dim-2); }
 .header-search:focus { border-color: var(--accent); }
 
-/* Settings flyout: Kumo Popover styles the panel; we lay out its contents. */
+/* Settings flyout: PopoverContent styles the panel; we lay out its contents. */
 .menu { position: relative; flex: none; }
 .iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel-2); color: var(--dim); cursor: pointer; font-size: 14px; padding: 0; }
 .iconbtn:hover { color: var(--text); border-color: var(--dim-2); }
@@ -111,7 +179,7 @@ body {
 .filters .count { margin-left: auto; color: var(--dim-2); font-size: 12px; }
 .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .controls .lbl { color: var(--dim-2); font-size: 11px; }
-/* Kumo Tabs (segmented) drive sort/view; keep them at intrinsic width. */
+/* Tabs (segmented) drive sort/view; keep them at intrinsic width. */
 .seg { flex: none; }
 
 .list { overflow-y: auto; flex: 1; min-height: 0; }
@@ -127,7 +195,7 @@ body {
 .row .sub .proj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .role { text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--dim-2); }
 
-/* Agent/gone badges use Kumo's <Badge>; nudge them to the compact app scale. */
+/* Agent/gone badges use <Badge>; nudge them to the compact app scale. */
 .agentbadge, .gonebadge { text-transform: uppercase; letter-spacing: 0.04em; }
 
 .count-pill { color: var(--accent); font-family: var(--mono); font-size: 11px; }
@@ -156,9 +224,6 @@ body {
 /* system turns (compaction summaries etc.) — harness-written, never "you" */
 .msg.system { background: var(--accent-soft); border: 1px solid var(--border-soft); border-radius: 12px; padding: 8px 14px 10px; margin: 6px 0; }
 .msg.system .who { color: var(--dim); }
-
-/* hide the Kumo tooltip arrow (renders as a white diamond that clashes with the dark tip) */
-div:has(> .tipin) > :not(.tipin) { display: none; }
 
 /* highlight marks (search «...» + in-body rehype) */
 mark {
@@ -359,24 +424,13 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 
 .loading { color: var(--dim-2); padding: 16px; }
 
-/* ── Kumo portal stacking + tooltip/flyout fixes ─────────────────────────────
-   Kumo/Base UI popups mount in unclassed absolute positioners with z-index:auto,
-   which our sticky chrome (.sidebar-top z:2, .detail-head z:1) painted over —
-   tooltips looked "cut off" and the flyout slid under the filter chips. */
-div:has(> .menu-panel),
-body > div > div:has(.tipin) { z-index: 60; }
+/* Settings flyout panel: a heavier drop shadow than the popover default, so it reads
+   as lifted off the header. Stacking is handled by the component (z-50, which Radix
+   also mirrors onto its positioner). */
 .menu-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
-}
-/* our tooltips: the popup is the direct parent of the .tipin content span —
-   black, white text, above everything (both themes) */
-div:has(> .tipin) {
-  background: #23272f !important;
-  color: #fff !important;
-  border: none !important;
-  font-size: 11px;
 }
 
 /* rows can be anchors (id-jump deep link) */
@@ -391,12 +445,10 @@ a.sid:hover { color: var(--accent); }
 /* browse-sort order toggle + active project chip */
 .orderbtn, .projchip { display: inline-flex; align-items: center; gap: 4px; }
 
-/* ── delete dialog (Kumo Dialog owns backdrop/panel; we lay out its body) ──── */
-/* Kumo's Dialog panel ships without inner padding — add our own so content isn't flush. */
-.modal { padding: 20px 22px 18px; }
+/* ── confirm dialogs (DialogContent owns backdrop/panel/padding; we lay out the body) ── */
 .modal-title { font-size: 16px; font-weight: 700; margin: 0 0 8px; }
 .modal-desc { color: var(--dim); font-size: 13px; margin: 0 0 14px; }
-.modal-check { margin-bottom: 18px; font-size: 12px; }
+.modal-check { margin-bottom: 18px; }
 .modal-check .warn { color: var(--danger); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 

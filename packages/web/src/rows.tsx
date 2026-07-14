@@ -1,5 +1,5 @@
 import { Star, Asterisk, Sparkle, Bot, Orbit, MessageCircle, MessagesSquare } from "lucide-react";
-import { Badge } from "@cloudflare/kumo";
+import { Badge } from "./ui/badge.tsx";
 import { fmtRel, agentClass, agentLabel, projLabel } from "./lib.ts";
 
 export function Snippet({ text }: { text: string }) {

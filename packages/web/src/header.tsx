@@ -13,7 +13,8 @@ import {
   Rows3,
   Rows4,
 } from "lucide-react";
-import { Popover, Button } from "@cloudflare/kumo";
+import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover.tsx";
+import { Button } from "./ui/button.tsx";
 import { trpc } from "./trpc.ts";
 import { AgentBadge } from "./rows.tsx";
 import { agentLabel } from "./lib.ts";
@@ -98,7 +99,7 @@ function PresetRow({
   );
 }
 
-// ── settings flyout (Kumo Popover) ──────────────────────────────────────────
+// ── settings flyout ─────────────────────────────────────────────────────────
 function SettingsMenu() {
   const qc = useQueryClient();
   const [theme, setTheme] = useState(initialTheme());
@@ -117,14 +118,12 @@ function SettingsMenu() {
   return (
     <div className="menu">
       <Popover>
-        <Popover.Trigger
-          render={
-            <button className="iconbtn" aria-label="menu">
-              <MenuIcon size={16} />
-            </button>
-          }
-        />
-        <Popover.Content side="bottom" align="start" sideOffset={6} className="menu-panel">
+        <PopoverTrigger asChild>
+          <button className="iconbtn" aria-label="menu">
+            <MenuIcon size={16} />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent side="bottom" align="start" sideOffset={6} className="menu-panel">
           <div className="st">
             <span>sessions</span>
             <b>{data?.totalSessions ?? "—"}</b>
@@ -170,8 +169,9 @@ function SettingsMenu() {
               variant="secondary"
               size="sm"
               disabled={sync.isPending}
-              loading={sync.isPending}
-              icon={<RefreshCw size={13} />}
+              // The icon spins in place while syncing — same idiom the detail pane's
+              // re-summarize / summarize actions already use.
+              icon={<RefreshCw size={13} className={sync.isPending ? "spin" : ""} />}
               onClick={() => sync.mutate()}
             >
               {sync.isPending ? "syncing…" : "sync"}
@@ -185,7 +185,7 @@ function SettingsMenu() {
               {theme === "light" ? "dark" : "light"}
             </Button>
           </div>
-        </Popover.Content>
+        </PopoverContent>
       </Popover>
     </div>
   );

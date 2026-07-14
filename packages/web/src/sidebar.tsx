@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Star, CornerDownRight, ArrowDown, ArrowUp, X, Highlighter } from "lucide-react";
-import { Tabs } from "@cloudflare/kumo";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs.tsx";
 import { trpc } from "./trpc.ts";
 import { fmtRel, fmtSize, shortId, projLabel } from "./lib.ts";
 import { SessionRow, MessageRow, HighlightRow } from "./rows.tsx";
@@ -200,17 +200,12 @@ export function Sidebar(props: {
         {!searching && !hlView && (
           <div className="controls">
             <span className="lbl">sort</span>
-            <Tabs
-              variant="segmented"
-              size="sm"
-              className="seg"
-              value={bsort}
-              onValueChange={(v) => setBsort(v as "updated" | "created")}
-              tabs={[
-                { value: "updated", label: "Last activity" },
-                { value: "created", label: "Created" },
-              ]}
-            />
+            <Tabs className="seg" value={bsort} onValueChange={(v) => setBsort(v as "updated" | "created")}>
+              <TabsList>
+                <TabsTrigger value="updated">Last activity</TabsTrigger>
+                <TabsTrigger value="created">Created</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <button
               className="chip orderbtn"
               title={order === "desc" ? "newest first — click for oldest first" : "oldest first — click for newest first"}
@@ -224,29 +219,19 @@ export function Sidebar(props: {
         {searching && (
           <div className="controls">
             <span className="lbl">sort</span>
-            <Tabs
-              variant="segmented"
-              size="sm"
-              className="seg"
-              value={sort}
-              onValueChange={(v) => setSort(v as "relevance" | "recent")}
-              tabs={[
-                { value: "relevance", label: "Best match" },
-                { value: "recent", label: "Recent" },
-              ]}
-            />
+            <Tabs className="seg" value={sort} onValueChange={(v) => setSort(v as "relevance" | "recent")}>
+              <TabsList>
+                <TabsTrigger value="relevance">Best match</TabsTrigger>
+                <TabsTrigger value="recent">Recent</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <span className="lbl">view</span>
-            <Tabs
-              variant="segmented"
-              size="sm"
-              className="seg"
-              value={view}
-              onValueChange={(v) => setView(v as "sessions" | "messages")}
-              tabs={[
-                { value: "sessions", label: "Conversations" },
-                { value: "messages", label: "Messages" },
-              ]}
-            />
+            <Tabs className="seg" value={view} onValueChange={(v) => setView(v as "sessions" | "messages")}>
+              <TabsList>
+                <TabsTrigger value="sessions">Conversations</TabsTrigger>
+                <TabsTrigger value="messages">Messages</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
         )}
       </div>

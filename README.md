@@ -15,7 +15,7 @@ in [GitHub issues](https://github.com/mpelka/trove/issues).
   antigravity (per-conversation SQLite, protobuf steps) — the last two prove the medium-neutral
   adapter contract (files *or* databases) with zero changes above the adapter layer.
 - **CLI:** sync / search / list / status / show / delete + metadata (name, star, tag, hide).
-- **GUI:** localhost web app (React 19 + [Kumo](https://github.com/cloudflare/kumo) + tRPC,
+- **GUI:** localhost web app (React 19 + [Radix](https://www.radix-ui.com/) primitives + tRPC,
   Bun-native bundling) — live full-text search with in-body highlighting, search-by-id jump,
   URL-synced state, markdown rendering, collapsed tool chains, user chat bubbles, rename/star,
   delete with tombstones, light/dark.
@@ -87,6 +87,7 @@ bun test        # colocated *.test.ts next to the code they test
 packages/core   adapters · ingest/slim-extract · SQLite+FTS5 store · search · metadata · curation
 packages/api    thin tRPC v11 router over core (zod-validated)
 packages/cli    commander CLI over core (direct calls, no HTTP)
-packages/web    Bun-native fullstack GUI (React 19 + Kumo + Tailwind v4 + tRPC client)
+packages/web    Bun-native fullstack GUI (React 19 + Tailwind v4 + tRPC client)
+                src/ui/ — vendored shadcn-style components on Radix primitives
 docs/           archived design doc (ground truth, rationale)
 ```
