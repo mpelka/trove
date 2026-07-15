@@ -220,9 +220,9 @@ describe("geminiCliAdapter.buildResumeCommand", () => {
   });
 });
 
-// ── .jsonl mutation log (gemini-cli 0.44.x) ──────────────────────────────────
-// 0.44 writes an append-only log instead of 0.49's whole-document .json. Machines run
-// different generations (work is on 0.44), so both must parse. Record semantics mirror
+// ── .jsonl mutation log (the current gemini format) ──────────────────────────
+// gemini writes an append-only log; `.json` whole-documents are a pre-0.44 legacy that
+// stores still contain, so both must parse. Record semantics mirror
 // loadConversationRecord in the published @google/gemini-cli 0.44 bundle.
 
 const HDR = (id: string) =>

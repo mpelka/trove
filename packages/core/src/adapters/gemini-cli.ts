@@ -49,7 +49,8 @@ function resolveProjectFromFile(sourceFile: string): string | null {
  * ingest, mirroring the CC adapter's SYNTHETIC_PREFIXES.
  *
  * `<session_context>` is gemini's environment preamble (date, OS, temp dir, directory tree,
- * memory). Verified in the @google/gemini-cli 0.44 bundle: getInitialChatHistory() unshifts
+ * memory). Verified in the @google/gemini-cli 0.44.1 and 0.50.0 bundles alike (still present
+ * in the latest): getInitialChatHistory() unshifts
  * exactly ONE message — `{role:"user", parts:[{text:"<session_context>…"}]}` under the stable
  * id deriveStableId(["environment-context"]) — with no assistant reply. It's the whole
  * message, never a wrapper around real input, so dropping it can't lose anything the user
@@ -117,12 +118,12 @@ function seedMessages(arr: unknown, into: Map<string, unknown>): void {
 }
 
 /**
- * Rebuild a session from a `.jsonl` log (gemini-cli 0.44.x).
+ * Rebuild a session from a `.jsonl` log — the CURRENT gemini format.
  *
- * Unlike the `.json` format (0.49.x), which is a whole session document, a `.jsonl` is an
- * append-only MUTATION LOG — you can't just parse it, you have to replay it. Record types,
- * mirroring `loadConversationRecord` in @google/gemini-cli 0.44 (verified against the
- * published bundle, not guessed):
+ * A `.jsonl` is an append-only MUTATION LOG, not a session document: you can't just parse
+ * it, you have to replay it. Record types mirror `loadConversationRecord`, verified
+ * byte-identical in the published 0.44.1 AND 0.50.0 bundles (not guessed, and stable across
+ * that whole range):
  *   - `{sessionId, projectHash, …}`  header  → merge into metadata; may carry `messages`
  *   - `{id, …}`                      message → upsert into the map BY ID, so a re-emitted
  *                                              id edits in place and order is insertion order
@@ -183,16 +184,19 @@ export const geminiCliAdapter: Adapter = {
     const root = tmpDir();
     const refs: SourceRef[] = [];
     // One session per file under ~/.gemini/tmp/<project>/chats/session-*.
-    // BOTH extensions: 0.49.x writes a whole-document `.json`, 0.44.x an append-only
-    // `.jsonl` mutation log. Machines run different gemini-cli generations, so support
-    // both rather than making the user configure it.
+    // BOTH extensions. `.jsonl` (an append-only mutation log) is what gemini writes now —
+    // verified in the 0.44.1, 0.49.0 and 0.50.0 bundles alike. `.json` is a whole-document
+    // LEGACY format from some pre-0.44 release; stores still hold them (this dev box has 33,
+    // untouched since March), so keep reading them.
     // The `session-` prefix also keeps out nested `chats/<id>/<id>.jsonl` skill/subagent
     // transcripts — internal noise, same as the CC adapter's subagent filter.
     const glob = new Glob("*/chats/session-*.{json,jsonl}");
-    // Keyed by <project>/<stem> — the session identity (see sessionKey). A 0.44 store can
-    // hold a legacy `session-X.json` NEXT TO its live `session-X.jsonl`; they're the same
+    // Keyed by <project>/<stem> — the session identity (see sessionKey). A store can hold a
+    // legacy `session-X.json` NEXT TO its live `session-X.jsonl`; they're the same
     // conversation in two formats, so take the .jsonl (the live log, and the only one with
     // the full rewind history) and drop the twin rather than importing it twice.
+    // NOTE the direction: .jsonl is the NEWER format, so preferring it is also future-proof.
+    // Do not "fix" this to prefer .json on the assumption that .json looks more modern.
     const byKey = new Map<string, SourceRef>();
     try {
       for await (const rel of glob.scan({ cwd: root, onlyFiles: true })) {
@@ -229,7 +233,7 @@ export const geminiCliAdapter: Adapter = {
     const text = new TextDecoder().decode(bytes);
     let root: any;
     if (ref.path.endsWith(".jsonl")) {
-      // 0.44.x: an append-only mutation log — replay it into a session document.
+      // The current format: an append-only mutation log — replay it into a session document.
       root = replaySessionLog(text);
     } else {
       try {
