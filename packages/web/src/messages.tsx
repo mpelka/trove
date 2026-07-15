@@ -22,15 +22,22 @@ const ChatMessage = memo(function ChatMessage(props: {
   role: string;
   text: string;
   ts: number | null;
+  calls: ToolCall[]; // tool calls carried by THIS turn (gemini agentic turns)
   highlight: string;
   highlights: HL[]; // saved highlights anchored to THIS message
   expandAll: boolean;
   resetTick: number;
 }) {
-  const { id, uid, seq, role, text, ts, highlight, highlights, expandAll, resetTick } = props;
+  const { id, uid, seq, role, text, ts, calls, highlight, highlights, expandAll, resetTick } = props;
   const [override, setOverride] = useState<boolean | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
   useEffect(() => setOverride(null), [resetTick]);
   const open = override ?? expandAll;
+  const toolCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of calls) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
+    return counts;
+  }, [calls]);
   const long = text.length > 1400;
   const rehype = [
     ...(highlight.trim() ? [rehypeHighlight(highlight)] : []),
@@ -48,23 +55,43 @@ const ChatMessage = memo(function ChatMessage(props: {
     >
       <div className="who">
         <span className="dot" />
-        {role === "user" ? "you" : role === "system" ? "summary" : "assistant"}
+        {role === "user" ? "you" : role === "system" ? "system" : "assistant"}
         {highlights.length > 0 && (
           <Highlighter size={12} className="hl-glyph" aria-label="has highlights" />
         )}
         <span className="t">{fmtRel(ts)}</span>
       </div>
-      <div className={`clampwrap${long && !open ? " clamped" : ""}`}>
-        <div className="md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehype} components={mdComponents}>
-            {text}
-          </ReactMarkdown>
+      {text && (
+        <div className={`clampwrap${long && !open ? " clamped" : ""}`}>
+          <div className="md">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehype} components={mdComponents}>
+              {text}
+            </ReactMarkdown>
+          </div>
         </div>
-      </div>
+      )}
       {long && (
         <div className="more" onClick={() => setOverride(!open)}>
           {open ? "show less" : "show more"}
         </div>
+      )}
+      {calls.length > 0 && (
+        <>
+          <div className="tool-summary" onClick={() => setToolsOpen((o) => !o)}>
+            <span className="caret">{toolsOpen ? "▾" : "▸"}</span>
+            {summarizeTools(toolCounts)}
+          </div>
+          {toolsOpen && (
+            <ul className="tool-calls">
+              {calls.map((c, i) => (
+                <li key={i}>
+                  <span className="tc-name">{c.name}</span>
+                  {c.input && <code className="tc-input">{c.input}</code>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   );
@@ -157,6 +184,7 @@ export const MessageList = memo(function MessageList(props: {
             role={it.role}
             text={it.text}
             ts={it.ts}
+            calls={it.calls}
             highlight={props.highlight}
             highlights={byMsg.get(it.id) ?? EMPTY_HL}
             expandAll={props.expandAll}

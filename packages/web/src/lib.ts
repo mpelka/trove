@@ -136,7 +136,7 @@ export function parseToolCalls(raw: string | null | undefined): ToolCall[] {
 }
 
 export type RenderItem =
-  | { kind: "msg"; id: number; uid: string | null; seq: number; role: string; text: string; ts: number | null }
+  | { kind: "msg"; id: number; uid: string | null; seq: number; role: string; text: string; ts: number | null; calls: ToolCall[] }
   | { kind: "tools"; id: number; counts: Map<string, number>; calls: ToolCall[]; ts: number | null };
 
 export function buildItems(
@@ -177,6 +177,9 @@ export function buildItems(
         role: m.role,
         text: m.text,
         ts: m.timestamp,
+        // Assistant turns can carry tool calls alongside (or instead of) prose — the
+        // gemini adapter emits tool-only turns as assistant + toolCalls, not role "tool".
+        calls: parseToolCalls(m.tool_calls),
       });
     }
   }

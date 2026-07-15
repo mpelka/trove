@@ -94,18 +94,19 @@ describe("geminiCliAdapter.parse", () => {
     expect(s.model).toBe("gemini-2.5-pro");
     expect(s.kind).toBeNull();
 
-    // m1 (text part only), m2, m6 survive; info/error/m5 skipped
-    expect(s.messages.map((m) => m.uid)).toEqual(["m1", "m2", "m6"]);
-    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    // m1 (text part only), m2, m4 (error → system), m6 survive; info/m5 skipped
+    expect(s.messages.map((m) => m.uid)).toEqual(["m1", "m2", "m4", "m6"]);
+    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant", "system", "user"]);
     expect(s.messages[0].text).toBe("Hi gemini, review this");
     expect(s.messages[1].text).toBe("Sure, here's my review.");
-    expect(s.messages[2].text).toBe("legacy string content");
+    expect(s.messages[2].text).toBe("quota exceeded"); // errors explain gaps — keep them
+    expect(s.messages[3].text).toBe("legacy string content");
 
     const all = s.messages.map((m) => m.text).join("\n");
     expect(all).not.toContain("TOOL BODY DROPPED");
     expect(all).not.toContain("BASE64BLOBDROPPED");
     expect(all).not.toContain("SECRET THOUGHTS");
-    expect(all).not.toContain("quota exceeded");
+    expect(all).not.toContain("switched model"); // info stays CLI noise
 
     // timestamps from startTime / lastUpdated
     expect(s.createdAt).toBe(Date.parse("2025-06-01T10:00:00.000Z"));
@@ -398,5 +399,204 @@ describe("gemini-cli synthetic <session_context>", () => {
     const r = await geminiCliAdapter.parse(refFor(p));
     // only a message STARTING with the tag is synthetic — this one is the human asking
     expect(r!.session.messages[0].text).toBe("what is the <session_context> block for?");
+  });
+});
+
+// ── recorded tool calls on gemini turns ──────────────────────────────────────
+// chatRecordingService (verified in the 0.44.1 bundle) records a tool-only model turn as
+// `{...newMessage("gemini",""), toolCalls: [...]}` — content is the EMPTY STRING and the
+// substance lives in toolCalls: [{id, name, displayName, description, args, result,
+// status, ...}]. Dropping empty-text messages blindly erased every agentic assistant
+// turn, so real sessions rendered as long runs of user messages with no replies.
+describe("gemini-cli recorded toolCalls", () => {
+  const TOOL_CALLS = [
+    {
+      id: "tc1",
+      name: "run_shell_command",
+      displayName: "Shell",
+      description: "ls the repo",
+      args: { command: "ls -la  \n  packages/" },
+      result: [{ functionResponse: { name: "run_shell_command", response: { output: "HUGE TOOL OUTPUT" } } }],
+      status: "success",
+      renderOutputAsMarkdown: false,
+    },
+    {
+      id: "tc2",
+      name: "read_file",
+      displayName: "ReadFile",
+      args: { absolute_path: "/Users/x/proj/src/index.ts" },
+      result: null,
+      status: "error",
+    },
+    {
+      id: "tc3",
+      name: "replace",
+      displayName: "Edit",
+      args: {
+        file_path: "/Users/x/proj/a.ts",
+        old_string: "OLD BLOB NEVER CAPTURED",
+        new_string: "NEW BLOB NEVER CAPTURED",
+      },
+      status: "cancelled",
+    },
+  ];
+
+  it("keeps a tool-only gemini turn (content: \"\") as assistant + mapped toolCalls (.json)", async () => {
+    const path = writeSession("h-tc", "session-tc.json", {
+      sessionId: "s",
+      messages: [
+        { id: "u1", type: "user", timestamp: "2026-07-01T10:00:00.000Z", content: [{ text: "list the files" }] },
+        { id: "g1", type: "gemini", timestamp: "2026-07-01T10:00:05.000Z", content: "", toolCalls: TOOL_CALLS, thoughts: [{ subject: "x" }], model: "gemini-2.5-pro" },
+        { id: "g2", type: "gemini", timestamp: "2026-07-01T10:00:09.000Z", content: "Done, three files." },
+      ],
+    });
+    const r = await geminiCliAdapter.parse(refFor(path));
+    const s = r!.session;
+    expect(s.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["u1", "user"],
+      ["g1", "assistant"], // kept despite empty text — the substance is the tool calls
+      ["g2", "assistant"],
+    ]);
+    const g1 = s.messages[1];
+    expect(g1.text).toBe("");
+    expect(g1.toolCalls).toEqual([
+      { name: "Shell", input: "ls -la packages/" }, // displayName preferred; command compacted
+      { name: "ReadFile", input: "/Users/x/proj/src/index.ts" },
+      { name: "Edit", input: "/Users/x/proj/a.ts" },
+    ]);
+    // blob args and result bodies never leak into the compact records
+    const json = JSON.stringify(s.messages);
+    expect(json).not.toContain("OLD BLOB");
+    expect(json).not.toContain("NEW BLOB");
+    expect(json).not.toContain("HUGE TOOL OUTPUT");
+    // the prose-only turn carries no toolCalls field
+    expect(s.messages[2].toolCalls).toBeUndefined();
+  });
+
+  it("maps toolCalls on a .jsonl mutation-log session too (same parse path)", async () => {
+    const toolMsg = JSON.stringify({
+      id: "g1",
+      timestamp: "2026-07-01T11:00:05.000Z",
+      type: "gemini",
+      content: "",
+      toolCalls: [TOOL_CALLS[0]],
+      model: "gemini-2.5-pro",
+    });
+    const p = writeSession("h-tcl", "session-tcl.jsonl", [HDR("s"), MSG("m1", "user", "run ls"), toolMsg].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(r!.session.messages[1].toolCalls).toEqual([{ name: "Shell", input: "ls -la packages/" }]);
+  });
+
+  it("keeps toolCalls that ride along WITH prose on the same gemini turn", async () => {
+    const p = writeSession("h-tcp", "session-tcp.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "check it"),
+      JSON.stringify({ id: "g1", type: "gemini", content: "Looking now.", toolCalls: [TOOL_CALLS[1]] }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages[1].text).toBe("Looking now.");
+    expect(r!.session.messages[1].toolCalls).toEqual([{ name: "ReadFile", input: "/Users/x/proj/src/index.ts" }]);
+  });
+
+  it("degrades gracefully on missing/garbage toolCall fields (untrusted input)", async () => {
+    const p = writeSession("h-tcg", "session-tcg.jsonl", [
+      HDR("s"),
+      JSON.stringify({
+        id: "g1",
+        type: "gemini",
+        content: "",
+        toolCalls: [
+          null, // garbage entry → skipped
+          "not an object", // garbage entry → skipped
+          { args: { command: "x" } }, // no name at all → skipped
+          { name: "read_file", args: { absolute_path: "/a/b.ts" } }, // no displayName → falls back to name
+          { name: "google_web_search", displayName: "  ", args: { query: "bun 403" } }, // blank displayName → name
+          { name: "mystery_tool", displayName: "Mystery", args: 42 }, // non-object args → name-only
+          { name: "odd_tool", args: { weird_key: { nested: true } } }, // no useful scalar key → name-only
+        ],
+      }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages).toHaveLength(1);
+    expect(r!.session.messages[0].toolCalls).toEqual([
+      { name: "read_file", input: "/a/b.ts" },
+      { name: "google_web_search", input: "bun 403" },
+      { name: "Mystery", input: "" },
+      { name: "odd_tool", input: "" },
+    ]);
+  });
+
+  it("toolCalls that is not an array is ignored, so the empty turn stays dropped", async () => {
+    const p = writeSession("h-tcn", "session-tcn.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "hi"),
+      JSON.stringify({ id: "g1", type: "gemini", content: "", toolCalls: { sneaky: "object" } }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1"]);
+  });
+
+  it("still drops a thought-only gemini turn (empty content, no toolCalls)", async () => {
+    const p = writeSession("h-thought", "session-thought.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "hmm"),
+      JSON.stringify({ id: "g1", type: "gemini", content: "", thoughts: [{ subject: "SECRET" }] }),
+      MSG("m2", "gemini", "actual reply"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1", "m2"]);
+    expect(JSON.stringify(r!.session.messages)).not.toContain("SECRET");
+  });
+
+  it("still drops a user message with only functionResponse parts (.jsonl path)", async () => {
+    const p = writeSession("h-fr", "session-fr.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "go"),
+      JSON.stringify({ id: "m2", type: "user", content: [{ functionResponse: { name: "shell", response: { output: "TOOL BODY" } } }] }),
+      MSG("m3", "gemini", "done"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1", "m3"]);
+  });
+});
+
+// ── error records → system messages ──────────────────────────────────────────
+// `type: "error"` records carry the reason a conversation broke (quota, 4xx …); keep
+// them as muted system rows so the gap is explained. `type: "info"` stays dropped.
+describe("gemini-cli error records", () => {
+  it("maps an error record to a system message with the error text (.jsonl)", async () => {
+    const p = writeSession("h-err", "session-err.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "keep going"),
+      JSON.stringify({ id: "e1", timestamp: "2026-07-01T12:00:00.000Z", type: "error", content: "Quota exceeded for gemini-2.5-pro" }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "keep going"],
+      ["system", "Quota exceeded for gemini-2.5-pro"],
+    ]);
+  });
+
+  it("skips error records whose content is empty or not a string", async () => {
+    const p = writeSession("h-err2", "session-err2.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "hi"),
+      JSON.stringify({ id: "e1", type: "error", content: "" }),
+      JSON.stringify({ id: "e2", type: "error", content: { code: 429 } }),
+      JSON.stringify({ id: "e3", type: "error" }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1"]);
+  });
+
+  it("still skips info records", async () => {
+    const p = writeSession("h-info", "session-info.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "hi"),
+      JSON.stringify({ id: "i1", type: "info", content: "switched to gemini-2.5-flash" }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1"]);
   });
 });

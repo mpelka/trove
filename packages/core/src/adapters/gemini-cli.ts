@@ -8,10 +8,74 @@ import type {
   NormalizedSession,
   ParseResult,
   SourceRef,
+  ToolCall,
 } from "./types.ts";
 import { shellQuote } from "./shell.ts";
 
 const DEFAULT_TMP_DIR = join(homedir(), ".gemini", "tmp");
+
+const SHELL_INPUT_MAX = 500;
+const OTHER_INPUT_MAX = 200;
+
+/** Collapse whitespace to single spaces and truncate to `max` chars (with an ellipsis). */
+function compact(s: string, max: number): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+}
+
+/** Derive a SHORT, one-line input descriptor for a recorded tool call, never including
+ *  large blob fields (content, new_string, old_string, file bodies) — mirrors the CC
+ *  adapter's toolInput (issue #20). `name` is the tool's INTERNAL name (e.g.
+ *  run_shell_command), which is what gemini keys args by. */
+function toolInput(name: string, args: unknown): string {
+  if (!args || typeof args !== "object") return "";
+  const o = args as Record<string, unknown>;
+  // Shell: the whole command, generously truncated (the CC adapter's Bash rule).
+  if (name === "run_shell_command" && typeof o.command === "string") {
+    return compact(o.command, SHELL_INPUT_MAX);
+  }
+  // Everything else: first useful key present, in priority order. Same list as the CC
+  // adapter plus gemini's own arg names (absolute_path for read_file, prompt for web_fetch).
+  for (const key of [
+    "command",
+    "file_path",
+    "absolute_path",
+    "path",
+    "pattern",
+    "query",
+    "url",
+    "prompt",
+    "description",
+  ]) {
+    const v = o[key];
+    if (typeof v === "string" && v.trim()) return compact(v, OTHER_INPUT_MAX);
+  }
+  return ""; // no useful scalar key → name-only
+}
+
+/**
+ * Map a gemini message's recorded `toolCalls` array into compact ToolCall records.
+ * Each entry (verified in the 0.44.1 bundle) looks like
+ * `{id, name, displayName, description, args, result, status, …}` — we keep only the
+ * human label (`displayName`, falling back to `name`) and a short args descriptor;
+ * `result` bodies and everything else are the bloat we drop. Untrusted input: every
+ * field is type-guarded, garbage entries are skipped rather than thrown on.
+ */
+function extractToolCalls(raw: unknown): ToolCall[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ToolCall[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const c = entry as Record<string, unknown>;
+    const internal = typeof c.name === "string" && c.name.trim() ? c.name.trim() : null;
+    const display =
+      typeof c.displayName === "string" && c.displayName.trim() ? c.displayName.trim() : null;
+    const name = display ?? internal;
+    if (!name) continue; // no usable name at all → not a tool call we can show
+    out.push({ name, input: toolInput(internal ?? name, c.args) });
+  }
+  return out;
+}
 
 /** Discovery root. `TROVE_GEMINI_ROOT` overrides the default `~/.gemini/tmp`;
  *  read per call (not at module load) so tests can point it at a fixture tree. */
@@ -27,6 +91,7 @@ interface GeminiMessage {
   type?: string; // "user" | "gemini" | "info" | "error"
   content?: unknown;
   thoughts?: unknown; // model reasoning — dropped
+  toolCalls?: unknown; // recorded tool invocations on "gemini" messages — mapped compactly
   tokens?: unknown;
   model?: string;
 }
@@ -261,18 +326,27 @@ export const geminiCliAdapter: Adapter = {
         const m = raw as GeminiMessage;
         const t = m.type;
 
-        // gemini → assistant (plain string), user → user (array of parts).
-        // info/error are system status/error strings — skip (not chat meat).
+        // gemini → assistant (plain string content; tool calls ride along in `toolCalls`),
+        // user → user (array of parts), error → system (explains gaps in broken
+        // conversations). info is CLI status noise — skip (not chat meat).
         let role: NormalizedMessage["role"];
         let text: string;
+        let toolCalls: ToolCall[] = [];
         if (t === "gemini") {
           role = "assistant";
           text = typeof m.content === "string" ? m.content.trim() : "";
+          // A tool-only turn is recorded with content: "" and the substance in toolCalls
+          // (verified in the 0.44.1 bundle) — dropping empties blindly erased every
+          // agentic assistant turn, leaving long runs of user messages.
+          toolCalls = extractToolCalls(m.toolCalls);
         } else if (t === "user") {
           role = "user";
           text = extractUserText(m.content);
           // Drop the CLI's own environment preamble — not the human talking.
           if (isSyntheticUser(text)) continue;
+        } else if (t === "error") {
+          role = "system";
+          text = typeof m.content === "string" ? m.content.trim() : "";
         } else {
           continue;
         }
@@ -286,8 +360,10 @@ export const geminiCliAdapter: Adapter = {
         }
 
         // A user message with only functionResponse/inlineData yields empty text →
-        // skip it (don't emit empties), exactly like the CC adapter.
-        if (!text) continue;
+        // skip it (don't emit empties), exactly like the CC adapter. A gemini message
+        // that is empty AND has no tool calls (thought-only turn) is likewise skipped —
+        // but an empty one WITH tool calls is a real assistant turn and stays.
+        if (!text && toolCalls.length === 0) continue;
 
         messages.push({
           uid: typeof m.id === "string" ? m.id : null,
@@ -297,6 +373,7 @@ export const geminiCliAdapter: Adapter = {
           parentUid: null,
           timestamp: Number.isNaN(ts) ? null : ts,
           text,
+          ...(toolCalls.length ? { toolCalls } : {}),
         });
       }
     }

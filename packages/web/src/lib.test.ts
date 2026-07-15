@@ -203,8 +203,23 @@ describe("buildItems", () => {
   it("passes plain messages through", () => {
     const items = buildItems([m(1, "user", "hi", 10), m(2, "assistant", "hello", 20)]);
     expect(items).toEqual([
-      { kind: "msg", id: 1, uid: null, seq: 0, role: "user", text: "hi", ts: 10 },
-      { kind: "msg", id: 2, uid: null, seq: 0, role: "assistant", text: "hello", ts: 20 },
+      { kind: "msg", id: 1, uid: null, seq: 0, role: "user", text: "hi", ts: 10, calls: [] },
+      { kind: "msg", id: 2, uid: null, seq: 0, role: "assistant", text: "hello", ts: 20, calls: [] },
+    ]);
+  });
+
+  it("attaches tool_calls to a non-tool message (gemini agentic turns)", () => {
+    const items = buildItems([
+      {
+        id: 1,
+        role: "assistant",
+        text: "",
+        timestamp: 5,
+        tool_calls: JSON.stringify([{ name: "Shell", input: "ls -la" }]),
+      },
+    ]);
+    expect(items).toEqual([
+      { kind: "msg", id: 1, uid: null, seq: 0, role: "assistant", text: "", ts: 5, calls: [{ name: "Shell", input: "ls -la" }] },
     ]);
   });
 
@@ -230,7 +245,7 @@ describe("buildItems", () => {
       expect(Object.fromEntries(g2.counts)).toEqual({ Edit: 1 });
     }
     // interleaving message breaks the run
-    expect(items[2]).toEqual({ kind: "msg", id: 4, uid: null, seq: 0, role: "assistant", text: "done", ts: 4 });
+    expect(items[2]).toEqual({ kind: "msg", id: 4, uid: null, seq: 0, role: "assistant", text: "done", ts: 4, calls: [] });
   });
 
   it("round-trips a collapsed run through summarizeTools", () => {

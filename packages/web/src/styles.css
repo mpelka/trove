@@ -372,10 +372,15 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 .msg.tool .text.expandable { cursor: pointer; user-select: none; }
 .msg.tool .text.expandable:hover { color: var(--text); }
 .msg.tool .text .caret { display: inline-block; width: 1em; color: var(--dim-2); }
-.msg.tool .tool-calls { list-style: none; margin: 4px 0 0; padding: 0 0 0 1em; display: flex; flex-direction: column; gap: 3px; }
-.msg.tool .tool-calls li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; min-width: 0; }
-.msg.tool .tool-calls .tc-name { color: var(--dim-2); font-weight: 600; flex: none; }
-.msg.tool .tool-calls .tc-input { color: var(--dim); font-family: var(--mono); white-space: pre-wrap; word-break: break-word; min-width: 0; }
+.msg .tool-calls { list-style: none; margin: 4px 0 0; padding: 0 0 0 1em; display: flex; flex-direction: column; gap: 3px; }
+.msg .tool-calls li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; min-width: 0; }
+.msg .tool-calls .tc-name { color: var(--dim-2); font-weight: 600; flex: none; }
+.msg .tool-calls .tc-input { color: var(--dim); font-family: var(--mono); white-space: pre-wrap; word-break: break-word; min-width: 0; }
+/* inline tool strip on a chat turn (gemini agentic turns carry toolCalls on the
+   assistant message itself, with or without prose) — same look as the tool group */
+.msg .tool-summary { color: var(--dim); font-family: var(--mono); font-size: 12px; cursor: pointer; user-select: none; margin-top: 2px; }
+.msg .tool-summary:hover { color: var(--text); }
+.msg .tool-summary .caret { display: inline-block; width: 1em; color: var(--dim-2); }
 .msg .more { color: var(--accent); cursor: pointer; font-size: 12px; margin-top: 4px; }
 .clampwrap.clamped {
   max-height: 340px;
