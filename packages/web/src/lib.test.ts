@@ -132,6 +132,38 @@ describe("rehypeHighlight", () => {
     expect(marks).toHaveLength(1);
     expect(marks[0].children[0].value).toBe("a.c");
   });
+
+  it("does not highlight stopwords — 'pick the api' only marks pick/api", () => {
+    const t = tree(el("p", [text("the theme has an api you pick")]));
+    rehypeHighlight("pick the api ")()(t);
+    const marks = (t.children[0] as any).children.filter((c: any) => c.tagName === "mark");
+    expect(marks.map((m: any) => m.children[0].value)).toEqual(["api", "pick"]);
+    // neither "the" nor "theme" got wrapped
+    const texts = (t.children[0] as any).children.filter((c: any) => c.type === "text");
+    expect(texts.some((c: any) => c.value.includes("the theme"))).toBe(true);
+  });
+
+  it("highlights a quoted phrase as one unit", () => {
+    const t = tree(el("p", [text("a socket hang up error, not socket alone")]));
+    rehypeHighlight('"socket hang up"')()(t);
+    const marks = (t.children[0] as any).children.filter((c: any) => c.tagName === "mark");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].children[0].value).toBe("socket hang up");
+  });
+
+  it("phrase wins over an overlapping single term (longest-first alternation)", () => {
+    const t = tree(el("p", [text("socket hang up now")]));
+    rehypeHighlight('now "socket hang up"')()(t);
+    const marks = (t.children[0] as any).children.filter((c: any) => c.tagName === "mark");
+    expect(marks.map((m: any) => m.children[0].value)).toEqual(["socket hang up", "now"]);
+  });
+
+  it("still highlights an all-stopword fallback query", () => {
+    const t = tree(el("p", [text("the cat")]));
+    rehypeHighlight("the ")()(t);
+    const marks = (t.children[0] as any).children.filter((c: any) => c.tagName === "mark");
+    expect(marks.map((m: any) => m.children[0].value)).toEqual(["the"]);
+  });
 });
 
 describe("rehypeHighlightExact", () => {

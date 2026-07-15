@@ -8,12 +8,14 @@ export type { SessionRow, MessageRow, MetaRow, HighlightRow } from "./db/schema.
 export { openContext, maybeSync, type TroveContext } from "./context.ts";
 export { sync, type SyncOptions, type SyncResult } from "./ingest/sync.ts";
 export {
+  buildMatch,
   searchMessages,
   searchSessions,
   type SearchOptions,
   type SearchHit,
   type SessionHit,
 } from "./search/search.ts";
+export { parseQuery, highlightUnits, type ParsedQuery } from "./search/query.ts";
 export {
   listSessions,
   status,

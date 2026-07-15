@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { parseQuery } from "./query.ts";
 
 export interface SearchOptions {
   query: string;
@@ -43,17 +44,33 @@ export interface SessionHit {
   bestTimestamp: number | null;
 }
 
-/** Build an FTS5 MATCH expression. Terms become quoted prefix queries; --exact = phrase. */
-function buildMatch(query: string, exact: boolean): string {
+/**
+ * Build an FTS5 MATCH expression from a user query (see query.ts for the grammar).
+ * Every term/phrase is individually double-quoted, so arbitrary user input can never
+ * produce an FTS5 syntax error. --exact = the whole query is one phrase.
+ *
+ * Phrase boost: a purely-unquoted query of 3+ surviving words becomes
+ * `("w1 w2 w3") OR ("w1" "w2" "w3")` — bm25 sums over ALL phrases in the query
+ * expression, so rows matching the exact-phrase branch score strictly better than
+ * rows that only match the scattered terms.
+ */
+export function buildMatch(query: string, exact: boolean): string {
   const q = query.trim();
   if (!q) return '""';
   const quote = (t: string) => `"${t.replace(/"/g, '""')}"`;
   if (exact) return quote(q);
-  return q
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((t) => `${quote(t)}*`)
-    .join(" ");
+  const { phrases, terms, prefixLast } = parseQuery(query);
+  const parts = phrases.map(quote);
+  terms.forEach((t, idx) => {
+    parts.push(quote(t) + (prefixLast && idx === terms.length - 1 ? "*" : ""));
+  });
+  if (parts.length === 0) return '""'; // e.g. a lone `"` — matches nothing
+  const base = parts.join(" ");
+  if (phrases.length === 0 && terms.length >= 3) {
+    // `"a b c"*` is valid FTS5: the trailing star makes the phrase's LAST token a prefix.
+    return `(${quote(terms.join(" "))}${prefixLast ? "*" : ""}) OR (${base})`;
+  }
+  return base;
 }
 
 const BASE_SQL = `

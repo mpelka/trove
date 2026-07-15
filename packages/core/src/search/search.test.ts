@@ -36,6 +36,13 @@ beforeAll(() => {
   seedMessage("gemini-cli:s2", 0, "user", "my quick brown terrier barked", 3000);
   seedMessage("gemini-cli:s2", 1, "assistant", "totally unrelated words here", 400);
   seedMessage("claude-code:s3", 0, "user", "nothing matching in this one", 500);
+  // stopword-junk fixture: under the old all-prefix semantics, "pick the api" matched
+  // BOTH of these ("pick"*→picket, "the"*→theme/there, "api"*→apiary)
+  seedMessage("claude-code:s3", 1, "user", "pick the api key", 600);
+  seedMessage("claude-code:s3", 2, "assistant", "theme there picket apiary", 700);
+  // phrase-boost fixture: same tokens, same length — only word order differs
+  seedMessage("claude-code:s3", 3, "user", "alpha beta gamma", 800);
+  seedMessage("claude-code:s3", 4, "assistant", "gamma beta alpha", 900);
 
   db.query("INSERT INTO session_meta (session_id, starred, tags) VALUES (?,?,?)").run(
     "claude-code:s1",
@@ -50,16 +57,54 @@ afterAll(() => {
 });
 
 describe("searchMessages", () => {
-  it("matches via FTS with implicit prefix expansion", () => {
-    // "quic" only matches because terms are turned into prefix queries ("quic"*)
+  it("prefix-expands ONLY the trailing token while typing", () => {
+    // "quic" matches because the trailing term becomes "quic"* (search-as-you-type)
     const hits = searchMessages(db, { query: "quic" });
     expect(hits.length).toBe(3);
     for (const h of hits) expect(h.snippet).toContain("«");
+    // a trailing space finishes the word — "quic" is now a whole token, no matches
+    expect(searchMessages(db, { query: "quic " })).toEqual([]);
+    // a non-trailing token is never a prefix: "quic brown" requires the token "quic"
+    expect(searchMessages(db, { query: "quic brown" })).toEqual([]);
   });
 
   it("treats multiple terms as AND (both must match)", () => {
     const hits = searchMessages(db, { query: "quick brown" });
     expect(hits.map((h) => h.sessionId).sort()).toEqual(["claude-code:s1", "gemini-cli:s2"]);
+  });
+
+  it("strips stopwords: 'pick the api' no longer drags in theme/there/picket junk", () => {
+    const hits = searchMessages(db, { query: "pick the api" });
+    // old semantics matched "theme there picket apiary" via "pick"*/"the"*/"api"*
+    expect(hits.length).toBe(1);
+    expect(hits[0].snippet).toContain("«pick»");
+    // "the" alone (completed) falls back to the literal token — theme/there do NOT match
+    const the = searchMessages(db, { query: "the " });
+    expect(the.length).toBeGreaterThan(0);
+    for (const h of the) expect(h.snippet).not.toContain("«theme»");
+    expect(the.some((h) => h.snippet.includes("«the»"))).toBe(true);
+  });
+
+  it("quoted phrases only match the full phrase, in order", () => {
+    const hits = searchMessages(db, { query: '"quick brown"' });
+    expect(hits.map((h) => h.sessionId).sort()).toEqual(["claude-code:s1", "gemini-cli:s2"]);
+    const one = searchMessages(db, { query: '"brown fox"' });
+    expect(one.length).toBe(1);
+    expect(one[0].sessionId).toBe("claude-code:s1");
+    expect(searchMessages(db, { query: '"fox brown"' })).toEqual([]);
+    // phrase + term mix: phrase must be intact AND the term present
+    expect(searchMessages(db, { query: '"quick brown" terrier ' }).map((h) => h.sessionId)).toEqual([
+      "gemini-cli:s2",
+    ]);
+  });
+
+  it("ranks an exact-phrase hit above the same words scattered (phrase boost)", () => {
+    const hits = searchMessages(db, { query: "alpha beta gamma " });
+    // both fixture messages match (AND), but the in-order one must score strictly better
+    expect(hits.length).toBe(2);
+    expect(hits[0].snippet).toContain("«alpha beta gamma»"); // marked as one phrase unit
+    expect(hits[0].timestamp).toBe(800); // "alpha beta gamma", not "gamma beta alpha"
+    expect(hits[0].score).toBeLessThan(hits[1].score); // bm25: lower = better
   });
 
   it("exact mode searches the phrase, not the terms", () => {
@@ -74,7 +119,11 @@ describe("searchMessages", () => {
   });
 
   it("does not throw on FTS5 special characters", () => {
-    for (const q of ['"', "*", "AND", "(", "co:lon", 'trailing"', "NEAR", "-minus", "a AND b OR c*"]) {
+    for (const q of [
+      '"', '""', '"""', "*", "AND", "(", "co:lon", 'trailing"', "NEAR", "NEAR(", "-minus",
+      "a AND b OR c*", '"unbalanced phrase to the end', 'mid"quote toggle"x', "żółć*", "^caret",
+      "   ", "", '" "', "a-b.c:d", "NOT NOT NOT",
+    ]) {
       expect(() => searchMessages(db, { query: q })).not.toThrow();
       expect(() => searchMessages(db, { query: q, exact: true })).not.toThrow();
     }

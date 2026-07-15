@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./adapters": "./src/adapters/index.ts",
-    "./format": "./src/format.ts"
+    "./format": "./src/format.ts",
+    "./query": "./src/search/query.ts"
   },
   "scripts": {
     "db:generate": "drizzle-kit generate"

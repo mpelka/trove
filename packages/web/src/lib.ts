@@ -4,6 +4,7 @@
 // browser bundle cannot load).
 
 export { fmtRel, fmtSize, agentLabel, projLabel, shortId } from "@trove/core/format";
+import { highlightUnits } from "@trove/core/query";
 
 /** Web-only: CSS class per agent (colors the round agent logo). */
 export const agentClass = (a: string) =>
@@ -20,7 +21,12 @@ export function escapeRegExp(s: string) {
 }
 
 export function rehypeHighlight(query: string) {
-  const terms = query.trim().split(/\s+/).filter(Boolean).map(escapeRegExp);
+  // Same parse the FTS5 MATCH builder uses: quoted phrases stay whole units,
+  // stopwords are already stripped — so "pick the api" no longer lights up
+  // every "the" in the conversation. Units come longest-first, so the regex
+  // alternation prefers a phrase over one of its words.
+  // (phrase-internal spaces match any whitespace run, so soft-wrapped text still marks)
+  const terms = highlightUnits(query).map((u) => escapeRegExp(u).replace(/ /g, "\\s+"));
   return () => (tree: any) => {
     if (!terms.length) return;
     const re = new RegExp(`(${terms.join("|")})`, "i");

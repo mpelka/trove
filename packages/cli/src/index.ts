@@ -98,7 +98,7 @@ program
 program
   .command("search")
   .description("Full-text search across all archived sessions")
-  .argument("<query...>", "keywords (or a phrase with --exact)")
+  .argument("<query...>", 'keywords — embed \'"a phrase"\' for phrase match, or --exact for the whole query')
   .option("--agent <id>", "filter by agent")
   .option("-n, --limit <n>", "max results", "20")
   .option("--exact", "phrase match")
