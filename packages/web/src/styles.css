@@ -115,16 +115,32 @@ body {
    header bleeds over the modal backdrop (both share the root stacking context). */
 .app { display: flex; flex-direction: column; height: 100%; isolation: isolate; }
 
-/* Header: settings menu + brand + search */
-.header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+/* Header: one slim (~44px) row — settings menu + brand + the ⌘K palette trigger */
+.header { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .brand { font-weight: 700; letter-spacing: 0.02em; font-size: 15px; flex: none; }
 .brand .dot { color: var(--accent); }
-.header-search-wrap { flex: 1; max-width: 720px; position: relative; display: flex; align-items: center; }
-.header-search { width: 100%; padding: 7px 34px 7px 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); font-size: 14px; outline: none; }
-.search-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; background: transparent; color: var(--dim-2); cursor: pointer; border-radius: 5px; }
-.search-clear:hover { color: var(--text); background: var(--panel); }
-.header-search::placeholder { color: var(--dim-2); }
-.header-search:focus { border-color: var(--accent); }
+
+/* palette trigger: a button dressed like a tiny search field; when a query is live
+   it displays that query (the old input's job), with a separate ✕ to clear. */
+.palette-btn {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 7px 0 10px; min-width: 0; max-width: 360px;
+  border-radius: 7px; border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--dim-2); font-size: 12px; cursor: pointer;
+}
+.palette-btn:hover { color: var(--text); border-color: var(--dim-2); }
+.palette-btn .palette-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-btn .palette-q.active { color: var(--text); font-weight: 600; }
+.palette-btn kbd {
+  font-family: var(--mono); font-size: 10px; line-height: 1; color: var(--dim-2);
+  border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; background: var(--panel);
+}
+.palette-clear { flex: none; }
+
+/* command palette dialog: Raycast-style upper band, flush panel (the Command inside
+   owns all padding). Unlayered, so it beats DialogContent's centering/padding
+   utilities (see ui/cn.ts on why plain app classes win). */
+.palette-modal { top: 15%; translate: -50% 0; padding: 0; width: min(580px, calc(100vw - 2rem)); }
 
 /* Settings flyout: PopoverContent styles the panel; we lay out its contents. */
 .menu { position: relative; flex: none; }

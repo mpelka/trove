@@ -621,6 +621,10 @@ export function Detail({
   id,
   targetMsgId,
   highlight,
+  expandAll,
+  onToggleExpand,
+  rawOpen,
+  onToggleRaw,
   infoOpen,
   onToggleInfo,
   onDeleted,
@@ -629,17 +633,22 @@ export function Detail({
   id: string | null;
   targetMsgId: number | null;
   highlight: string;
+  // expandAll/rawOpen live in App (the command palette drives them too); App resets
+  // both when the selected session changes, matching the old key-remount behaviour.
+  expandAll: boolean;
+  onToggleExpand(): void;
+  rawOpen: boolean;
+  onToggleRaw(): void;
   infoOpen: boolean;
   onToggleInfo(): void;
   onDeleted(): void;
   onProjectClick(project: string): void;
 }) {
   const qc = useQueryClient();
-  const [expandAll, setExpandAll] = useState(false);
-  // Raw source view (debug): local state, not URL — a transient inspection mode that
-  // shouldn't survive session switches (Detail is keyed by id) or land in deep links.
-  const [rawOpen, setRawOpen] = useState(false);
   const [resetTick, setResetTick] = useState(0);
+  // Any expand/collapse-all flip clears per-message overrides — previously bundled
+  // into the head button's onClick; now an effect so the palette path resets too.
+  useEffect(() => setResetTick((t) => t + 1), [expandAll]);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [pendingRemove, setPendingRemove] = useState<number | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -746,12 +755,9 @@ export function Detail({
           summarizing={mSummarize.isPending}
           onSummarize={summarize}
           expandAll={expandAll}
-          onToggleExpand={() => {
-            setExpandAll((v) => !v);
-            setResetTick((t) => t + 1);
-          }}
+          onToggleExpand={onToggleExpand}
           rawOpen={rawOpen}
-          onToggleRaw={() => setRawOpen((v) => !v)}
+          onToggleRaw={onToggleRaw}
           infoOpen={infoOpen}
           onToggleInfo={onToggleInfo}
           onDeleted={onDeleted}

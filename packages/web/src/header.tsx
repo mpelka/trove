@@ -6,6 +6,7 @@ import {
   Moon,
   Sun,
   X,
+  Search,
   FoldHorizontal,
   RectangleHorizontal,
   UnfoldHorizontal,
@@ -100,21 +101,14 @@ function PresetRow({
 }
 
 // ── settings flyout ─────────────────────────────────────────────────────────
-function SettingsMenu() {
+// Theme state lives in App now (the command palette toggles it too); the menu just
+// renders the current value and calls up.
+function SettingsMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onToggleTheme(): void }) {
   const qc = useQueryClient();
-  const [theme, setTheme] = useState(initialTheme());
   const [width, setWidth] = useState(() => readVar("trove-msg-width", WIDTH_DEFAULT));
   const [line, setLine] = useState(() => readVar("trove-msg-line", LINE_DEFAULT));
   const { data } = useQuery({ queryKey: ["status"], queryFn: () => trpc.status.query() });
   const sync = useMutation({ mutationFn: () => trpc.sync.mutate({}), onSuccess: () => qc.invalidateQueries() });
-  const toggleTheme = () => {
-    const n = theme === "light" ? "dark" : "light";
-    setTheme(n);
-    document.documentElement.dataset.mode = n;
-    try {
-      localStorage.setItem("trove-theme", n);
-    } catch {}
-  };
   return (
     <div className="menu">
       <Popover>
@@ -180,7 +174,7 @@ function SettingsMenu() {
               variant="secondary"
               size="sm"
               icon={theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
-              onClick={toggleTheme}
+              onClick={onToggleTheme}
             >
               {theme === "light" ? "dark" : "light"}
             </Button>
@@ -191,28 +185,42 @@ function SettingsMenu() {
   );
 }
 
-export function Header({ query, setQuery }: { query: string; setQuery(v: string): void }) {
+// ── slim header ──────────────────────────────────────────────────────────────
+// One ~44px row: menu, wordmark, and a compact palette trigger. The old always-
+// focused search input is gone — the ⌘K palette writes the same ?q state, and the
+// trigger doubles as the visible home of the active query (with a clear button),
+// so search state never becomes invisible.
+export function Header({
+  query,
+  onClearQuery,
+  onOpenPalette,
+  hint,
+  theme,
+  onToggleTheme,
+}: {
+  query: string;
+  onClearQuery(): void;
+  onOpenPalette(): void;
+  hint: string; // platform-correct shortcut label (⌘K / Ctrl K)
+  theme: "light" | "dark";
+  onToggleTheme(): void;
+}) {
   return (
     <header className="header">
-      <SettingsMenu />
+      <SettingsMenu theme={theme} onToggleTheme={onToggleTheme} />
       <div className="brand">
         trove<span className="dot">.</span>
       </div>
-      <div className="header-search-wrap">
-        <input
-          className="header-search"
-          autoFocus
-          placeholder="Search every session…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-        />
-        {query && (
-          <button className="search-clear" title="clear (Esc)" onClick={() => setQuery("")}>
-            <X size={15} />
-          </button>
-        )}
-      </div>
+      <button className="palette-btn" title={`Search (${hint})`} onClick={onOpenPalette}>
+        <Search size={13} />
+        <span className={`palette-q${query ? " active" : ""}`}>{query || "Search…"}</span>
+        <kbd>{hint}</kbd>
+      </button>
+      {query && (
+        <button className="iconbtn palette-clear" aria-label="clear search" title="clear search" onClick={onClearQuery}>
+          <X size={14} />
+        </button>
+      )}
     </header>
   );
 }
