@@ -215,6 +215,38 @@ describe("appRouter", () => {
     expect(d!.summary).toBeNull();
   });
 
+  it("rawSource reads a live file, flags missing sources, and is null for unknown ids", async () => {
+    // CC's seeded source_path (/src/cc.jsonl) doesn't exist and it has no archive →
+    // typed unavailable, not a thrown 500.
+    expect(await caller.rawSource({ id: CC_ID })).toEqual({
+      available: false,
+      sourcePath: "/src/cc.jsonl",
+    });
+    expect(await caller.rawSource({ id: "nope:missing" })).toBeNull();
+
+    // A session whose source file actually exists streams from it.
+    const p = join(dir, "live.jsonl");
+    const content = '{"hello":"raw"}\n';
+    writeFileSync(p, content);
+    trove.db
+      .query(
+        `INSERT INTO sessions (id, agent, native_id, source_path, source_medium, content_hash, imported_at)
+         VALUES (?,?,?,?,?,?,?)`,
+      )
+      .run("gemini-cli:live", "gemini-cli", "live", p, "file", "h", Date.now());
+    const r = await caller.rawSource({ id: "gemini-cli:live" });
+    expect(r).toEqual({
+      available: true,
+      text: content,
+      nextOffset: null,
+      totalBytes: content.length,
+      sourcePath: p,
+      fromArchive: false,
+    });
+    await expect(caller.rawSource({ id: CC_ID, offset: -1 })).rejects.toThrow(); // nonnegative
+    await expect(caller.rawSource({ id: CC_ID, offset: 1.5 })).rejects.toThrow(); // int
+  });
+
   it("rejects invalid input via zod", async () => {
     await expect(caller.search({ query: "" })).rejects.toThrow(); // min(1)
     await expect(caller.search({ query: "x", limit: 500 })).rejects.toThrow(); // max(200)

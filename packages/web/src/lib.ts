@@ -111,6 +111,37 @@ export function rehypeHighlightExact(highlights: HL[]) {
   };
 }
 
+// ── raw source view helpers (pure, unit-tested) ─────────────────────────────
+
+/** Split accumulated raw source text into display lines. Chunks are cut at line
+ *  boundaries server-side, so a trailing "\n" is the norm — drop the empty tail it
+ *  would otherwise produce (but keep interior blank lines intact). */
+export function splitRawLines(text: string): string[] {
+  if (text === "") return [];
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/** True when a raw line LOOKS like a JSON object/array — the cheap per-render
+ *  affordance check (cursor/hover). The click handler still validates via
+ *  prettyJsonLine, so a `{oops` line shows the affordance but won't toggle. */
+export function looksJson(line: string): boolean {
+  const c = line.trimStart()[0];
+  return c === "{" || c === "[";
+}
+
+/** Pretty-print a raw source line if it parses as a JSON object/array; null for
+ *  anything else (scalars gain nothing from pretty-printing, so they don't toggle). */
+export function prettyJsonLine(line: string): string | null {
+  if (!looksJson(line)) return null;
+  try {
+    return JSON.stringify(JSON.parse(line), null, 2);
+  } catch {
+    return null;
+  }
+}
+
 export function parseUsed(text: string): string[] {
   const m = text.match(/^\[used:\s*(.+)\]$/);
   if (!m) return [text];

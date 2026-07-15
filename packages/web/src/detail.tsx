@@ -17,6 +17,7 @@ import {
   PanelRight,
   PanelRightOpen,
   AlertTriangle,
+  FileCode,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -29,6 +30,7 @@ import { trpc } from "./trpc.ts";
 import { fmtRel, fmtSize, projLabel, shortId } from "./lib.ts";
 import { AgentBadge } from "./rows.tsx";
 import { MessageList } from "./messages.tsx";
+import { RawView } from "./raw-view.tsx";
 import { Divider } from "./divider.tsx";
 
 const mdComponents = { a: (props: any) => <a {...props} target="_blank" rel="noopener noreferrer" /> };
@@ -386,6 +388,8 @@ function DetailHead({
   onSummarize,
   expandAll,
   onToggleExpand,
+  rawOpen,
+  onToggleRaw,
   infoOpen,
   onToggleInfo,
   onDeleted,
@@ -398,6 +402,8 @@ function DetailHead({
   onSummarize(force: boolean): void;
   expandAll: boolean;
   onToggleExpand(): void;
+  rawOpen: boolean;
+  onToggleRaw(): void;
   infoOpen: boolean;
   onToggleInfo(): void;
   onDeleted(): void;
@@ -505,6 +511,13 @@ function DetailHead({
           )}
           <IconButton label={expandAll ? "collapse all" : "expand all"} onClick={onToggleExpand}>
             {expandAll ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
+          </IconButton>
+          <IconButton
+            label={rawOpen ? "back to conversation" : "raw source"}
+            className={`iconbtn${rawOpen ? " raw-on" : ""}`}
+            onClick={onToggleRaw}
+          >
+            <FileCode size={14} />
           </IconButton>
           <IconButton label="delete" className="iconbtn danger" onClick={() => setConfirming(true)}>
             <Trash2 size={14} />
@@ -623,6 +636,9 @@ export function Detail({
 }) {
   const qc = useQueryClient();
   const [expandAll, setExpandAll] = useState(false);
+  // Raw source view (debug): local state, not URL — a transient inspection mode that
+  // shouldn't survive session switches (Detail is keyed by id) or land in deep links.
+  const [rawOpen, setRawOpen] = useState(false);
   const [resetTick, setResetTick] = useState(0);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [pendingRemove, setPendingRemove] = useState<number | null>(null);
@@ -734,19 +750,27 @@ export function Detail({
             setExpandAll((v) => !v);
             setResetTick((t) => t + 1);
           }}
+          rawOpen={rawOpen}
+          onToggleRaw={() => setRawOpen((v) => !v)}
           infoOpen={infoOpen}
           onToggleInfo={onToggleInfo}
           onDeleted={onDeleted}
         />
-        <div ref={messagesRef} onClick={onMessagesClick} className="messages-scroll">
-          <MessageList
-            messages={data.messages}
-            highlight={highlight}
-            highlights={data.highlights}
-            expandAll={expandAll}
-            resetTick={resetTick}
-          />
-        </div>
+        {rawOpen ? (
+          // Full-pane swap: the raw dump wants the reader's whole width, and nothing
+          // is fetched until this mounts (the "lazy" requirement for free).
+          <RawView id={data.session.id} />
+        ) : (
+          <div ref={messagesRef} onClick={onMessagesClick} className="messages-scroll">
+            <MessageList
+              messages={data.messages}
+              highlight={highlight}
+              highlights={data.highlights}
+              expandAll={expandAll}
+              resetTick={resetTick}
+            />
+          </div>
+        )}
         {pending && (
           <button
             className="hl-float"

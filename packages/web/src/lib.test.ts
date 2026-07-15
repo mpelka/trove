@@ -12,6 +12,9 @@ import {
   parseUsed,
   summarizeTools,
   buildItems,
+  splitRawLines,
+  looksJson,
+  prettyJsonLine,
 } from "./lib.ts";
 
 describe("fmtRel", () => {
@@ -41,6 +44,37 @@ describe("fmtSize", () => {
     expect(fmtSize(1048575)).toBe("1024K");
     expect(fmtSize(1048576)).toBe("1.0M");
     expect(fmtSize(1572864)).toBe("1.5M");
+  });
+});
+
+describe("splitRawLines", () => {
+  it("splits on newlines and drops only the trailing empty line", () => {
+    expect(splitRawLines("")).toEqual([]);
+    expect(splitRawLines("a\nb\n")).toEqual(["a", "b"]); // server chunks end with \n
+    expect(splitRawLines("a\nb")).toEqual(["a", "b"]); // final chunk may not
+    expect(splitRawLines("a\n\nb\n")).toEqual(["a", "", "b"]); // interior blanks kept
+    expect(splitRawLines("\n")).toEqual([""]); // a single blank line is still a line
+  });
+});
+
+describe("looksJson / prettyJsonLine", () => {
+  it("looksJson is the cheap object/array affordance check", () => {
+    expect(looksJson('{"a":1}')).toBe(true);
+    expect(looksJson("  [1,2]")).toBe(true);
+    expect(looksJson("plain text")).toBe(false);
+    expect(looksJson("42")).toBe(false); // scalars don't toggle
+    expect(looksJson("")).toBe(false);
+  });
+  it("pretty-prints valid JSON object/array lines", () => {
+    expect(prettyJsonLine('{"a":1,"b":[2,3]}')).toBe('{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}');
+    expect(prettyJsonLine("[1,2]")).toBe("[\n  1,\n  2\n]");
+  });
+  it("returns null for invalid or non-object lines (they must not toggle)", () => {
+    expect(prettyJsonLine("not json")).toBeNull();
+    expect(prettyJsonLine('{"broken":')).toBeNull(); // looksJson affordance, but inert
+    expect(prettyJsonLine('"a string"')).toBeNull();
+    expect(prettyJsonLine("123")).toBeNull();
+    expect(prettyJsonLine("")).toBeNull();
   });
 });
 

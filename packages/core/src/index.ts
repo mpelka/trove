@@ -29,6 +29,13 @@ export {
 } from "./queries.ts";
 export { deleteSession, tombstonedPaths, type DeleteResult } from "./curate.ts";
 export {
+  readRawSource,
+  RAW_CHUNK_BYTES,
+  type RawSourceChunk,
+  type RawSourceResult,
+  type RawSourceUnavailable,
+} from "./raw.ts";
+export {
   addHighlight,
   removeHighlight,
   listHighlights,

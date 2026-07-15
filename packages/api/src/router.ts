@@ -23,6 +23,7 @@ import {
   summarizerCommand,
   summarizeSession,
   removeSummary,
+  readRawSource,
 } from "@trove/core";
 import { router, publicProcedure } from "./context.ts";
 
@@ -87,6 +88,16 @@ export const appRouter = router({
       }) ?? null;
     return { ...detail, resumeCommand };
   }),
+
+  // Raw source view (debug): one ~1MB chunk of the session's on-disk source per call.
+  // Byte-offset chunking, cut at line boundaries; pass the returned `nextOffset` back
+  // to continue (null = done) — full contract documented on readRawSource in core.
+  // The path comes from the session row only (never from the client); a gone source
+  // falls back to the gzipped archive copy, and a missing archive yields a typed
+  // `{ available: false }` rather than a 500. Unknown ids return null (like sessionDetail).
+  rawSource: publicProcedure
+    .input(idInput.extend({ offset: z.number().int().nonnegative().optional() }))
+    .query(({ ctx, input }) => readRawSource(ctx.trove.db, input.id, input.offset ?? 0)),
 
   context: publicProcedure
     .input(z.object({ messageId: z.number().int().positive(), depth: z.number().int().positive().max(50).optional() }))
