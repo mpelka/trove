@@ -335,3 +335,68 @@ describe("gemini-cli session identity", () => {
     expect(ids.size).toBe(3); // three distinct ids → sync keeps all three
   });
 });
+
+// ── harness-injected environment preamble ────────────────────────────────────
+// gemini-cli 0.44 unshifts a <session_context> block as a role:"user" message
+// (getInitialChatHistory in the published bundle). It's the CLI talking to itself: it
+// showed up as the human's opening line, and — worse — became the derived title, so every
+// affected session looked identical in the list.
+const SESSION_CTX = `<session_context>
+This is the Gemini CLI. We are setting up the context for our chat.
+Today's date is Monday, 14 July 2026 (formatted according to the user's locale).
+My operating system is: linux
+The project's temporary directory is: /home/m025699/.gemini/tmp/trove
+Here is the folder structure of the current working directories:
+/home/m025699/projects/apps/trove/
+├── packages/
+└── scripts/
+
+Some memory from GEMINI.md
+</session_context>`;
+
+describe("gemini-cli synthetic <session_context>", () => {
+  it("drops the injected preamble so the first REAL user turn leads", async () => {
+    const p = writeSession("h-ctx", "session-ctx.jsonl", [
+      HDR("s"),
+      JSON.stringify({ id: "env", timestamp: "2026-07-14T12:29:00.000Z", type: "user", content: [{ text: SESSION_CTX }] }),
+      MSG("m1", "user", "why does bun install 403 at work?"),
+      MSG("m2", "gemini", "Because the registry blocks that version."),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => [m.role, m.text])).toEqual([
+      ["user", "why does bun install 403 at work?"],
+      ["assistant", "Because the registry blocks that version."],
+    ]);
+    // seq renumbers over KEPT messages, so the real turn is first
+    expect(r!.session.messages[0].seq).toBe(0);
+    // and nothing retains the junk
+    expect(JSON.stringify(r!.session.messages)).not.toContain("session_context");
+  });
+
+  it("distinct sessions get distinct opening turns (the identical-titles bug)", async () => {
+    // Same preamble, different real questions → the list must not show them as twins.
+    const mk = (proj: string, q: string) =>
+      writeSession(proj, "session-t.jsonl", [
+        HDR("s"),
+        JSON.stringify({ id: "env", type: "user", content: [{ text: SESSION_CTX }] }),
+        MSG("m1", "user", q),
+        MSG("m2", "gemini", "sure"),
+      ].join("\n"));
+    const a = await geminiCliAdapter.parse(refFor(mk("t-a", "how do I pin drizzle?")));
+    const b = await geminiCliAdapter.parse(refFor(mk("t-b", "why is gemini empty in trove?")));
+    // sync derives the title from the first user message — these must differ
+    expect(a!.session.messages[0].text).toBe("how do I pin drizzle?");
+    expect(b!.session.messages[0].text).toBe("why is gemini empty in trove?");
+  });
+
+  it("keeps a real message that merely mentions session_context in passing", async () => {
+    const p = writeSession("h-ctx2", "session-ctx2.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "what is the <session_context> block for?"),
+      MSG("m2", "gemini", "It's the environment preamble."),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    // only a message STARTING with the tag is synthetic — this one is the human asking
+    expect(r!.session.messages[0].text).toBe("what is the <session_context> block for?");
+  });
+});

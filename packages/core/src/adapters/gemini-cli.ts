@@ -44,6 +44,25 @@ function resolveProjectFromFile(sourceFile: string): string | null {
   }
 }
 
+/**
+ * Harness-injected pseudo-user turns — the CLI talking to itself, not the human. Dropped at
+ * ingest, mirroring the CC adapter's SYNTHETIC_PREFIXES.
+ *
+ * `<session_context>` is gemini's environment preamble (date, OS, temp dir, directory tree,
+ * memory). Verified in the @google/gemini-cli 0.44 bundle: getInitialChatHistory() unshifts
+ * exactly ONE message — `{role:"user", parts:[{text:"<session_context>…"}]}` under the stable
+ * id deriveStableId(["environment-context"]) — with no assistant reply. It's the whole
+ * message, never a wrapper around real input, so dropping it can't lose anything the user
+ * typed. Left in, it shows as the human's opening line AND becomes the derived title, which
+ * made every affected session look identical in the list.
+ */
+const SYNTHETIC_USER_PREFIXES = ["<session_context>"];
+
+function isSyntheticUser(text: string): boolean {
+  const t = text.trimStart();
+  return SYNTHETIC_USER_PREFIXES.some((p) => t.startsWith(p));
+}
+
 /** Extract the "meat" from one user message.content array: keep `text` parts,
  *  drop `functionResponse` (tool results) and `inlineData` (base64 blobs). A plain
  *  string content (legacy shape) is kept as-is. */
@@ -248,6 +267,8 @@ export const geminiCliAdapter: Adapter = {
         } else if (t === "user") {
           role = "user";
           text = extractUserText(m.content);
+          // Drop the CLI's own environment preamble — not the human talking.
+          if (isSyntheticUser(text)) continue;
         } else {
           continue;
         }
