@@ -14,6 +14,7 @@ import {
 // A neutral baseline ctx; tests override the fields they care about.
 const ctx = (over: Partial<PaletteCtx> = {}): PaletteCtx => ({
   agent: null,
+  visibleAgents: AGENTS.map((a) => a.id), // baseline: every chip visible
   starOnly: false,
   hlView: false,
   searching: false,
@@ -143,6 +144,24 @@ describe("action visibility predicates", () => {
     expect(action("filter-agent-gemini-cli").visible(ctx({ agent: "claude-code" }))).toBe(true);
     // one filter action per agent exists
     for (const a of AGENTS) expect(() => action(`filter-agent-${a.id}`)).not.toThrow();
+  });
+
+  it("agent filter actions mirror chip visibility (hidden chip → no action)", () => {
+    const some = ctx({ visibleAgents: ["claude-code", "gemini-cli"] });
+    expect(action("filter-agent-claude-code").visible(some)).toBe(true);
+    expect(action("filter-agent-gemini-cli").visible(some)).toBe(true);
+    for (const id of ["copilot", "antigravity", "chatgpt", "claude-web"]) {
+      expect(action(`filter-agent-${id}`).visible(some)).toBe(false);
+    }
+    // fresh/empty store: no chips → no per-agent actions at all
+    const none = ctx({ visibleAgents: [] });
+    for (const a of AGENTS) expect(action(`filter-agent-${a.id}`).visible(none)).toBe(false);
+    // …but "Show all agents" ignores visibility — it clears, never narrows
+    expect(action("filter-agent-all").visible(ctx({ agent: "copilot", visibleAgents: [] }))).toBe(true);
+    // active agent stays hidden as an action even when its chip is visible (it's already applied)
+    expect(
+      action("filter-agent-gemini-cli").visible(ctx({ agent: "gemini-cli", visibleAgents: ["gemini-cli"] })),
+    ).toBe(false);
   });
 
   it("clear-search only shows while a search is active", () => {

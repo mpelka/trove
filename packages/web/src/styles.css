@@ -163,6 +163,8 @@ body {
 /* section label: small caps header above each group in the flyout */
 .menu-panel .sec-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim-2); margin: 0 0 -2px; }
 .menu-panel .sec { display: flex; flex-direction: column; gap: 6px; }
+/* fine-print under a section (explains the agent visibility checkboxes) */
+.menu-panel .sec-note { color: var(--dim-2); font-size: 10.5px; line-height: 1.35; }
 /* labelled agent row: icon + name + count, aligned */
 .menu-panel .st.agent-st { gap: 8px; }
 .menu-panel .st.agent-st .agent-name { color: var(--text); flex: 1; }
@@ -191,17 +193,24 @@ body {
 .divider:hover::after, .divider.dragging::after { left: 1px; width: 3px; background: var(--accent); }
 .detail { min-width: 0; overflow-y: auto; }
 
-.sidebar-top { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; min-height: 98px; }
-.filters { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+/* Filter band: ONE wrap-allowed row (chips · spacer · sort/search controls · count).
+   Vertical padding matches .detail-head (8px) and .filters' min-height matches the
+   28px .dh-actions buttons, so in browse mode both pane heads land at 45px and
+   bottom-align. Search mode may wrap to a second line — that's fine. */
+.sidebar-top { padding: 8px 12px; border-bottom: 1px solid var(--border-soft); }
+.filters { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; min-height: 28px; }
 .chip { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--dim); cursor: pointer; font-size: 12px; }
 .chip:hover { color: var(--text); border-color: var(--dim-2); }
 .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.chip.star { display: inline-flex; align-items: center; gap: 4px; }
-.filters .count { margin-left: auto; color: var(--dim-2); font-size: 12px; }
-.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.controls .lbl { color: var(--dim-2); font-size: 11px; }
+/* trailing cluster (sort control / search segs + count) hugs the right edge and
+   wraps as one unit when the chips overflow */
+.filters .ftail { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.filters .count { color: var(--dim-2); font-size: 12px; }
+.lbl { color: var(--dim-2); font-size: 11px; }
 /* Tabs (segmented) drive sort/view; keep them at intrinsic width. */
 .seg { flex: none; }
+/* browse-sort popover: the old sort row's controls, stacked */
+.sort-pop { align-items: flex-start; gap: 8px; }
 
 .list { overflow-y: auto; flex: 1; min-height: 0; }
 .row { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
@@ -485,7 +494,7 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 .raw-more:disabled { cursor: default; opacity: 0.6; }
 .raw-empty { color: var(--dim-2); padding: 32px 0; text-align: center; font-size: 12px; }
 .raw-empty .raw-path { display: block; margin-top: 6px; font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
-.iconbtn.raw-on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.iconbtn.raw-on, .iconbtn.accent-on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
 /* Settings flyout panel: a heavier drop shadow than the popover default, so it reads
    as lifted off the rail. Stacking is handled by the component (z-50, which Radix

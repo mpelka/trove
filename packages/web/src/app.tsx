@@ -1,7 +1,7 @@
 import "./styles.css";
 import { StrictMode, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClientProvider, useMutation } from "@tanstack/react-query";
+import { QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import { NuqsAdapter } from "nuqs/adapters/react";
 import { useQueryState, parseAsString, parseAsBoolean, parseAsInteger, parseAsStringEnum } from "nuqs";
 import { Divider } from "./divider.tsx";
@@ -11,7 +11,13 @@ import { Rail, initialTheme } from "./rail.tsx";
 import { Sidebar, type Selected } from "./sidebar.tsx";
 import { Detail } from "./detail.tsx";
 import { CommandPalette } from "./command-palette.tsx";
-import { isMacLike, shortcutHint, type PaletteCtx, type PaletteHandlers } from "./palette-actions.ts";
+import { AGENTS, isMacLike, shortcutHint, type PaletteCtx, type PaletteHandlers } from "./palette-actions.ts";
+import {
+  HIDDEN_AGENTS_KEY,
+  parseHiddenAgents,
+  serializeHiddenAgents,
+  visibleAgentChips,
+} from "./chip-visibility.ts";
 
 // styles.css keys light/dark off `data-mode` on the root element (set pre-paint in index.html).
 document.documentElement.dataset.mode = initialTheme();
@@ -130,9 +136,42 @@ function App() {
     onSuccess: () => queryClient.invalidateQueries(),
   });
 
+  // ── agent-chip visibility (chrome only — never filters data) ──────────────
+  // Same ["status"] query the settings menu renders, so react-query serves both
+  // from one fetch; sync/star mutations already invalidate it.
+  const statusQ = useQuery({ queryKey: ["status"], queryFn: () => trpc.status.query() });
+  // Manually-unchecked agents, persisted per machine (home vs work run different agents).
+  const [hiddenAgents, setHiddenAgents] = useState<ReadonlySet<string>>(() => {
+    try {
+      return parseHiddenAgents(localStorage.getItem(HIDDEN_AGENTS_KEY));
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleAgentHidden = (id: string) => {
+    const next = new Set(hiddenAgents);
+    if (next.has(id)) next.delete(id);
+    else {
+      next.add(id);
+      // Never leave the list filtered by a chip that just vanished.
+      if (agent === id) setAgent(null);
+    }
+    try {
+      localStorage.setItem(HIDDEN_AGENTS_KEY, serializeHiddenAgents(next));
+    } catch {}
+    setHiddenAgents(next);
+  };
+  const visibleAgents = visibleAgentChips({
+    known: AGENTS.map((a) => a.id),
+    counts: statusQ.data?.perAgent,
+    hidden: hiddenAgents,
+    active: agent ?? null,
+  });
+
   const searching = query.trim().length > 0 && !hlView;
   const paletteCtx: PaletteCtx = {
     agent: agent ?? null,
+    visibleAgents,
     starOnly,
     hlView,
     searching,
@@ -172,6 +211,12 @@ function App() {
         hint={shortcutHint(MAC)}
         theme={theme}
         onToggleTheme={toggleTheme}
+        starOnly={starOnly}
+        onToggleStar={() => setStarOnly((p) => !p)}
+        hlView={hlView}
+        onToggleHl={() => setHlView(hlView ? null : true)}
+        hiddenAgents={hiddenAgents}
+        onToggleAgentHidden={toggleAgentHidden}
       />
       <CommandPalette
         open={paletteOpen}
@@ -186,10 +231,10 @@ function App() {
           query={dq}
           agent={agent ?? undefined}
           setAgent={(a) => setAgent(a ?? null)}
+          visibleAgents={visibleAgents}
           project={project}
           setProject={setProject}
           starOnly={starOnly}
-          setStarOnly={(fn) => setStarOnly((p) => fn(p))}
           sort={sort}
           setSort={(s) => setSort(s)}
           view={view}
@@ -199,7 +244,6 @@ function App() {
           order={order}
           setOrder={(v) => setOrder(v)}
           hlView={hlView}
-          setHlView={(v) => setHlView(v || null)}
           selected={selected}
           onSelect={select}
         />

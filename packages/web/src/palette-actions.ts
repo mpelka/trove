@@ -62,6 +62,9 @@ export function fuzzyFilterSessions<T extends SessionLite>(sessions: T[], query:
 /** Everything an action's visibility/label may depend on — a snapshot of app state. */
 export type PaletteCtx = {
   agent: string | null; // active agent filter (null = all)
+  /** Agent ids whose sidebar chips are visible on this machine (see chip-visibility.ts).
+   *  Palette "Filter: X" actions mirror the chips — a hidden chip has no action either. */
+  visibleAgents: string[];
   starOnly: boolean;
   hlView: boolean;
   searching: boolean; // left-pane query is non-empty
@@ -130,7 +133,9 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
       id: `filter-agent-${a.id}`,
       group: "filters",
       label: () => `Filter: ${a.chip} (${agentLabel(a.id)})`,
-      visible: (ctx) => ctx.agent !== a.id,
+      // Mirrors the sidebar chips: no chip on this machine → no palette action.
+      // (The already-active agent needs no action; "Show all agents" stays regardless.)
+      visible: (ctx) => ctx.agent !== a.id && ctx.visibleAgents.includes(a.id),
       run: (_ctx, h) => h.setAgent(a.id),
     }),
   ),

@@ -6,6 +6,8 @@ import {
   Moon,
   Sun,
   Search,
+  Star,
+  Highlighter,
   FoldHorizontal,
   RectangleHorizontal,
   UnfoldHorizontal,
@@ -16,6 +18,7 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover.tsx";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip.tsx";
 import { Button } from "./ui/button.tsx";
+import { Checkbox } from "./ui/checkbox.tsx";
 import { trpc } from "./trpc.ts";
 import { AgentBadge } from "./rows.tsx";
 import { agentLabel } from "./lib.ts";
@@ -104,7 +107,17 @@ function PresetRow({
 // Theme state lives in App (the command palette toggles it too); the menu just
 // renders the current value and calls up. Anchored to the rail, so it flies
 // out to the RIGHT instead of dropping down.
-function SettingsMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onToggleTheme(): void }) {
+function SettingsMenu({
+  theme,
+  onToggleTheme,
+  hiddenAgents,
+  onToggleAgentHidden,
+}: {
+  theme: "light" | "dark";
+  onToggleTheme(): void;
+  hiddenAgents: ReadonlySet<string>;
+  onToggleAgentHidden(agent: string): void;
+}) {
   const qc = useQueryClient();
   const [width, setWidth] = useState(() => readVar("trove-msg-width", WIDTH_DEFAULT));
   const [line, setLine] = useState(() => readVar("trove-msg-line", LINE_DEFAULT));
@@ -132,11 +145,21 @@ function SettingsMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onTog
             <div className="sec-label">agents</div>
             {data?.perAgent.map((a) => (
               <div className="st agent-st" key={a.agent}>
+                {/* Chrome-only visibility switch: unchecked hides the sidebar filter
+                    chip (and its palette action) on THIS machine — sessions stay in
+                    "all", search, and jumps regardless. Persisted in localStorage. */}
+                <Checkbox
+                  checked={!hiddenAgents.has(a.agent)}
+                  onCheckedChange={() => onToggleAgentHidden(a.agent)}
+                  aria-label={`show ${agentLabel(a.agent)} filter chip`}
+                  title="show filter chip (sessions stay searchable either way)"
+                />
                 <AgentBadge agent={a.agent} />
                 <span className="agent-name">{agentLabel(a.agent)}</span>
                 <b>{a.sessions.toLocaleString()}</b>
               </div>
             ))}
+            <div className="sec-note">unchecked = hide filter chip; sessions stay in “all” &amp; search</div>
           </div>
           <hr />
           <div className="sec">
@@ -213,29 +236,49 @@ function RailButton({
 // ── icon rail ────────────────────────────────────────────────────────────────
 // A ~48px full-height strip on the far left — the top header's replacement, so
 // the reader gets ALL the vertical space. Top-to-bottom: brand mark, settings
-// menu, palette trigger; theme toggle pinned to the bottom. The trigger no
-// longer displays the query text — while a search is active it carries an
-// accent dot, names the query in its tooltip, and the palette offers a
-// "Clear search" action, so search state stays one glance / one ⌘K away.
+// menu, palette trigger, starred/highlights view toggles; theme toggle pinned
+// to the bottom. The search trigger no longer displays the query text — while
+// a search is active it carries an accent dot, names the query in its tooltip,
+// and the palette offers a "Clear search" action, so search state stays one
+// glance / one ⌘K away. Starred/highlights moved here from the sidebar's chip
+// row (they're VIEW toggles, not agent filters) — they drive the same nuqs
+// state the chips did; active = accent, same treatment as the raw-view button.
 export function Rail({
   query,
   onOpenPalette,
   hint,
   theme,
   onToggleTheme,
+  starOnly,
+  onToggleStar,
+  hlView,
+  onToggleHl,
+  hiddenAgents,
+  onToggleAgentHidden,
 }: {
   query: string;
   onOpenPalette(): void;
   hint: string; // platform-correct shortcut label (⌘K / Ctrl K)
   theme: "light" | "dark";
   onToggleTheme(): void;
+  starOnly: boolean;
+  onToggleStar(): void;
+  hlView: boolean;
+  onToggleHl(): void;
+  hiddenAgents: ReadonlySet<string>;
+  onToggleAgentHidden(agent: string): void;
 }) {
   return (
     <nav className="rail" aria-label="app">
       <div className="rail-brand" title="trove" aria-hidden="true">
         t<span className="dot">.</span>
       </div>
-      <SettingsMenu theme={theme} onToggleTheme={onToggleTheme} />
+      <SettingsMenu
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+        hiddenAgents={hiddenAgents}
+        onToggleAgentHidden={onToggleAgentHidden}
+      />
       <RailButton
         label={query ? `Searching “${query}” — ${hint}` : `Search (${hint})`}
         className="iconbtn rail-search"
@@ -243,6 +286,20 @@ export function Rail({
       >
         <Search size={15} />
         {query && <span className="qdot" aria-hidden="true" />}
+      </RailButton>
+      <RailButton
+        label={starOnly ? "starred only — on" : "starred only"}
+        className={`iconbtn${starOnly ? " accent-on" : ""}`}
+        onClick={onToggleStar}
+      >
+        <Star size={15} fill={starOnly ? "currentColor" : "none"} />
+      </RailButton>
+      <RailButton
+        label={hlView ? "browse highlights — on" : "browse highlights"}
+        className={`iconbtn${hlView ? " accent-on" : ""}`}
+        onClick={onToggleHl}
+      >
+        <Highlighter size={15} />
       </RailButton>
       <div className="rail-spacer" />
       <RailButton
