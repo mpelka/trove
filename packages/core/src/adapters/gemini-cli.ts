@@ -83,8 +83,9 @@ function tmpDir(): string {
   return process.env.TROVE_GEMINI_ROOT || DEFAULT_TMP_DIR;
 }
 
-/** One gemini message. Assistant content is a plain string; user content is an
- *  array of parts (or, legacy, a plain string). Fields we don't touch are optional. */
+/** One gemini message. Assistant content is a plain string in fresh records but the API
+ *  PARTS ARRAY after a reseed (see extractGeminiText); user content is an array of parts
+ *  (or, legacy, a plain string). Fields we don't touch are optional. */
 interface GeminiMessage {
   id?: string;
   timestamp?: string;
@@ -146,6 +147,64 @@ function isStateSnapshot(text: string): boolean {
   return text.trimStart().startsWith(STATE_SNAPSHOT_PREFIX);
 }
 
+/**
+ * Extract the answer text from a gemini message's `content`.
+ *
+ * Fresh records store assistant content as a plain STRING — but after a RESEED (see
+ * replaySessionLog) it becomes the API's PARTS ARRAY: updateMessagesFromHistory in the
+ * 0.44.1 bundle rewrites every surviving message as
+ * `{...existing, content: turn.content.parts || []}`, i.e. `[{text}, {functionCall:{…}},
+ * …]`, some parts flagged as model reasoning. Treating array content as "" (the old
+ * behavior) parsed every post-reseed assistant turn empty, so it was dropped and whole
+ * conversations rendered as runs of user messages with tool strips and no answers.
+ *
+ * Thought detection is defensive: ANY truthy `thought` marker on a part (the API sets
+ * `thought: true` on reasoning parts) means model reasoning, not the answer — the same
+ * policy as dropping the `thoughts` field on fresh records. A plain `{text}` part is the
+ * answer. Joined with "\n\n" like extractUserText.
+ */
+function extractGeminiText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  const prose: string[] = [];
+  for (const part of content) {
+    if (part == null) continue;
+    if (typeof part === "string") {
+      if (part.trim()) prose.push(part.trim());
+      continue;
+    }
+    if (typeof part !== "object") continue;
+    const p = part as Record<string, unknown>;
+    if (p.thought) continue; // truthy thought flag → reasoning, dropped like `thoughts`
+    if (typeof p.text === "string" && p.text.trim()) prose.push(p.text.trim());
+  }
+  return prose.join("\n\n");
+}
+
+/**
+ * ToolCall records from `functionCall` parts in a reseeded gemini message's parts array.
+ * These are the REAL call side — name + args straight from the model — richer than the
+ * name-only functionResponse fallback below. `excludeIds`: call ids already covered by
+ * the same message's recorded `toolCalls` entries (those carry displayName, so they win
+ * on an id collision); an id-less part is kept — fail toward showing the tool.
+ */
+function toolCallsFromFunctionCallParts(content: unknown, excludeIds: Set<string>): ToolCall[] {
+  if (!Array.isArray(content)) return [];
+  const out: ToolCall[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const fc = (part as Record<string, unknown>).functionCall;
+    if (!fc || typeof fc !== "object") continue;
+    const f = fc as Record<string, unknown>;
+    const id = typeof f.id === "string" && f.id ? f.id : null;
+    if (id && excludeIds.has(id)) continue; // recorded toolCalls entry wins
+    const name = typeof f.name === "string" && f.name.trim() ? f.name.trim() : null;
+    if (!name) continue; // no usable name → not showable
+    out.push({ name, input: toolInput(name, f.args) });
+  }
+  return out;
+}
+
 /** Extract the "meat" from one user message.content array: keep `text` parts,
  *  drop `functionResponse` (tool results) and `inlineData` (base64 blobs). A plain
  *  string content (legacy shape) is kept as-is. */
@@ -169,6 +228,18 @@ function extractUserText(content: unknown): string {
   return prose.join("\n\n");
 }
 
+/** The call ids carried on one gemini message's recorded `toolCalls` entries. */
+function toolCallEntryIds(raw: unknown): Set<string> {
+  const ids = new Set<string>();
+  if (!Array.isArray(raw)) return ids;
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = (entry as Record<string, unknown>).id;
+    if (typeof id === "string" && id) ids.add(id);
+  }
+  return ids;
+}
+
 /**
  * Pre-pass: collect the ids of every tool call RECORDED on gemini messages, across the
  * whole session. Needed to dedup the functionResponse fallback below — when gemini did
@@ -176,6 +247,12 @@ function extractUserText(content: unknown): string {
  * messages, and without this set every call would render twice. A whole-session pass
  * (not a running set) because replay order means a call's `toolCalls` may be recorded on
  * a message that appears before OR after its functionResponse.
+ *
+ * `functionCall` PARTS count as recorded too: a reseeded gemini message carries the call
+ * side inside its parts-array content (see extractGeminiText / toolCallsFromFunctionCallParts),
+ * and those parts render as real chips on the assistant turn — so their ids must suppress
+ * the functionResponse fallback the same way recorded `toolCalls` ids do, or every call
+ * would show twice after a reseed.
  */
 function collectRecordedToolCallIds(rawMessages: unknown): Set<string> {
   const ids = new Set<string>();
@@ -183,11 +260,16 @@ function collectRecordedToolCallIds(rawMessages: unknown): Set<string> {
   for (const raw of rawMessages) {
     if (!raw || typeof raw !== "object") continue;
     const m = raw as GeminiMessage;
-    if (m.type !== "gemini" || !Array.isArray(m.toolCalls)) continue;
-    for (const entry of m.toolCalls) {
-      if (!entry || typeof entry !== "object") continue;
-      const id = (entry as Record<string, unknown>).id;
-      if (typeof id === "string" && id) ids.add(id);
+    if (m.type !== "gemini") continue;
+    for (const id of toolCallEntryIds(m.toolCalls)) ids.add(id);
+    if (Array.isArray(m.content)) {
+      for (const part of m.content) {
+        if (!part || typeof part !== "object") continue;
+        const fc = (part as Record<string, unknown>).functionCall;
+        if (!fc || typeof fc !== "object") continue;
+        const id = (fc as Record<string, unknown>).id;
+        if (typeof id === "string" && id) ids.add(id);
+      }
     }
   }
   return ids;
@@ -263,11 +345,17 @@ function seedMessages(arr: unknown, into: Map<string, unknown>): void {
  *   - `{id, …}`                      message → upsert into the map BY ID, so a re-emitted
  *                                              id edits in place and order is insertion order
  *   - `{$set: {...}}`                        → merge into metadata; a `messages` array here
- *                                              REPLACES the whole map (clear + re-seed)
+ *                                              is a RESEED — MERGED by id, NOT a replace
+ *                                              (deliberate divergence from the vendor; see
+ *                                              the inline comment on that branch)
  *   - `{$rewindTo: id}`              rewind  → drop that message and everything after it;
  *                                              an unknown id clears the history entirely
  *
  * Returns the same shape the `.json` format has, so the parser downstream is format-agnostic.
+ *
+ * MIRROR CONTRACT: scripts/diagnose-gemini-replay.sh replays logs with these exact
+ * semantics to explain reader/raw-view mismatches. If you change a branch here, change
+ * the script too (and vice versa), or the diagnostic silently starts lying.
  */
 function replaySessionLog(text: string): Record<string, unknown> | null {
   let metadata: Record<string, unknown> = {};
@@ -294,7 +382,25 @@ function replaySessionLog(text: string): Record<string, unknown> | null {
       messages.set(r.id, r);
     } else if (r.$set && typeof r.$set === "object") {
       if (Array.isArray(r.$set.messages)) {
-        messages.clear();
+        // A `$set.messages` array is a RESEED: chatRecordingService.updateMessagesFromHistory
+        // (verified in the 0.44.1 bundle) runs after a rewind and after COMPACTION, rebuilds
+        // the message list from the MODEL's in-memory history, and emits it wholesale.
+        // Crucially, that array reflects what the model still REMEMBERS, not what happened:
+        // turns compressed away by compaction — and CLI-side info/error records, which were
+        // never in the model's history — are simply absent, even though their records still
+        // sit EARLIER in this same file. The vendor's own loader replays this as a replace,
+        // which is right for the CLI (it only needs the model's working memory) — but trove
+        // is an ARCHIVE, and those pre-compaction records are its whole value. Clearing here
+        // implemented the vendor's amnesia; merging implements an archive. So: upsert each
+        // seeded message by id — existing ids keep their map position and take the reseeded
+        // body, new ids (e.g. the <state_snapshot> compaction summary) append at the end as
+        // of this reseed, and subsequent records keep appending after them, so the final
+        // order reads chronologically.
+        // DELIBERATE ASYMMETRY with $rewindTo above: a rewind is the USER destroying history
+        // on purpose (target-inclusive deletion, verified against the bundle's
+        // slice(0, messageIndex)), so it deletes; a reseed is the model forgetting, so it
+        // must not. (Fallout of the old clear+seed: 20+ real sessions lost pre-compaction
+        // turns, the worst dropping 6000+ message-states.)
         seedMessages(r.$set.messages, messages);
       }
       metadata = { ...metadata, ...r.$set };
@@ -400,19 +506,29 @@ export const geminiCliAdapter: Adapter = {
         const m = raw as GeminiMessage;
         const t = m.type;
 
-        // gemini → assistant (plain string content; tool calls ride along in `toolCalls`),
-        // user → user (array of parts), error → system (explains gaps in broken
-        // conversations). info is CLI status noise — skip (not chat meat).
+        // gemini → assistant (string content when fresh, parts array after a reseed; tool
+        // calls ride along in `toolCalls` and/or functionCall parts), user → user (array
+        // of parts), error → system (explains gaps in broken conversations). info is CLI
+        // status noise — skip (not chat meat).
         let role: NormalizedMessage["role"];
         let text: string;
         let toolCalls: ToolCall[] = [];
         if (t === "gemini") {
           role = "assistant";
-          text = typeof m.content === "string" ? m.content.trim() : "";
+          text = extractGeminiText(m.content);
           // A tool-only turn is recorded with content: "" and the substance in toolCalls
           // (verified in the 0.44.1 bundle) — dropping empties blindly erased every
           // agentic assistant turn, leaving long runs of user messages.
           toolCalls = extractToolCalls(m.toolCalls);
+          if (Array.isArray(m.content)) {
+            // Reseeded turn: the parts array carries the REAL call side as functionCall
+            // parts. Merge them after any recorded `toolCalls`; on an id collision the
+            // recorded entry wins (it carries displayName).
+            toolCalls = [
+              ...toolCalls,
+              ...toolCallsFromFunctionCallParts(m.content, toolCallEntryIds(m.toolCalls)),
+            ];
+          }
         } else if (t === "user") {
           text = extractUserText(m.content);
           // Drop the CLI's own harness-injected turns — not the human talking.

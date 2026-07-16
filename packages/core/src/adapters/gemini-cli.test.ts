@@ -274,14 +274,17 @@ describe("gemini-cli .jsonl (0.44.x mutation log)", () => {
     expect(r!.session.messages.map((m) => m.text)).toEqual(["fixed", "reply"]);
   });
 
-  it("$set.messages replaces the whole history (the real 2-line work shape)", async () => {
-    // Exactly what the work machine's files look like: a header, then one big $set.
+  it("$set.messages MERGES by id — accumulated messages absent from the reseed survive", async () => {
+    // The work-machine shape: a header, then one big $set (a reseed). The reseed reflects
+    // the MODEL's memory, not the log's history — replaying it as clear+seed implemented
+    // the vendor's amnesia and ate every pre-compaction turn. Merge semantics: absent ids
+    // survive in place, seeded ids upsert, new ids append.
     const setLine = JSON.stringify({
       $set: { lastUpdated: "2026-06-19T12:00:00.000Z", messages: [JSON.parse(MSG("x1", "user", "from set")), JSON.parse(MSG("x2", "gemini", "ok"))] },
     });
-    const p = writeSession("h-set", "session-set.jsonl", [HDR("s"), MSG("gone", "user", "should be replaced"), setLine].join("\n"));
+    const p = writeSession("h-set", "session-set.jsonl", [HDR("s"), MSG("kept", "user", "not in the reseed"), setLine].join("\n"));
     const r = await geminiCliAdapter.parse(refFor(p));
-    expect(r!.session.messages.map((m) => m.text)).toEqual(["from set", "ok"]);
+    expect(r!.session.messages.map((m) => m.text)).toEqual(["not in the reseed", "from set", "ok"]);
   });
 
   it("$rewindTo drops that message and everything after it", async () => {
@@ -784,5 +787,174 @@ describe("gemini-cli functionResponse tool rows", () => {
     const json = JSON.stringify(r!.session.messages);
     expect(json).not.toContain("HIDDEN");
     expect(json).not.toContain("Workspace Directories");
+  });
+});
+
+// ── compaction reseeds ($set.messages) + parts-array gemini content ──────────
+// chatRecordingService.updateMessagesFromHistory (verified in the 0.44.1 bundle) runs
+// after rewind and after COMPACTION: it rebuilds the message list from the MODEL's
+// in-memory history and emits one `$set:{messages:[…]}` record. Two traps for an archive:
+//   1. every surviving gemini message's `content` becomes the API PARTS ARRAY
+//      (`{...existing, content: turn.content.parts || []}`) — a string no more;
+//   2. turns compressed away are absent from the array even though their records still
+//      sit EARLIER in the same file.
+// Pre-fix, trove replayed the reseed as clear+seed and parsed array content as "" — on
+// the real work store 20+ sessions were affected, the worst losing 6000+ message-states,
+// all rendering as runs of user messages with tool strips and no answers.
+describe("gemini-cli reseed ($set.messages merge) and parts-array content", () => {
+  const FR = (id: string | null, name: string) =>
+    ({ functionResponse: { ...(id ? { id } : {}), name, response: { output: "NEVER CAPTURED" } } });
+
+  it("extracts text from a gemini message whose content is a parts ARRAY, skipping thoughts", async () => {
+    const p = writeSession("h-parts", "session-parts.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "explain"),
+      JSON.stringify({
+        id: "g1", type: "gemini", timestamp: "2026-06-19T11:44:09.000Z", model: "gemini-2.5-pro",
+        content: [
+          { thought: true, text: "SECRET REASONING" }, // truthy thought flag → reasoning, dropped
+          { text: "First paragraph." },
+          { text: "Second paragraph." },
+        ],
+      }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(r!.session.messages[1].text).toBe("First paragraph.\n\nSecond paragraph."); // joined like extractUserText
+    expect(JSON.stringify(r!.session.messages)).not.toContain("SECRET REASONING");
+  });
+
+  it("maps functionCall parts to toolCalls with toolInput conventions (no blob capture)", async () => {
+    const p = writeSession("h-fc", "session-fc.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "run it"),
+      JSON.stringify({
+        id: "g1", type: "gemini",
+        content: [
+          { text: "Running it now." },
+          { functionCall: { id: "fc1", name: "run_shell_command", args: { command: "ls   -la\npackages/" } } },
+          { functionCall: { id: "fc2", name: "replace", args: { file_path: "/a.ts", old_string: "OLD BLOB", new_string: "NEW BLOB" } } },
+          { functionCall: { name: "  " } }, // blank name → skipped
+          { functionCall: "garbage" }, // not an object → skipped
+        ],
+      }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    const g1 = r!.session.messages[1];
+    expect(g1.role).toBe("assistant");
+    expect(g1.text).toBe("Running it now.");
+    expect(g1.toolCalls).toEqual([
+      { name: "run_shell_command", input: "ls -la packages/" }, // command compacted
+      { name: "replace", input: "/a.ts" }, // blob args never captured
+    ]);
+    const json = JSON.stringify(r!.session.messages);
+    expect(json).not.toContain("OLD BLOB");
+    expect(json).not.toContain("NEW BLOB");
+  });
+
+  it("merges functionCall parts with recorded toolCalls; recorded wins on id collision", async () => {
+    const p = writeSession("h-fcmix", "session-fcmix.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "go"),
+      JSON.stringify({
+        id: "g1", type: "gemini",
+        // the SAME call (tc1) appears both as a recorded entry and a functionCall part —
+        // one chip, and the recorded entry's displayName wins; tc9 exists only as a part
+        toolCalls: [{ id: "tc1", name: "run_shell_command", displayName: "Shell", args: { command: "ls" } }],
+        content: [
+          { functionCall: { id: "tc1", name: "run_shell_command", args: { command: "ls" } } },
+          { functionCall: { id: "tc9", name: "glob", args: { pattern: "*.md" } } },
+        ],
+      }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages[1].toolCalls).toEqual([
+      { name: "Shell", input: "ls" }, // recorded entry, not a duplicate part-derived chip
+      { name: "glob", input: "*.md" },
+    ]);
+  });
+
+  it("a functionCall part id suppresses the functionResponse fallback (no double chips)", async () => {
+    const p = writeSession("h-fcdedup", "session-fcdedup.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "go"),
+      JSON.stringify({ id: "g1", type: "gemini", content: [
+        { text: "On it." },
+        { functionCall: { id: "call9", name: "glob", args: { pattern: "**/*.ts" } } },
+      ] }),
+      // call9's response must NOT synthesize a second chip; the unrecorded other1 must
+      JSON.stringify({ id: "u2", type: "user", content: [FR("call9", "glob"), FR("other1", "read_file")] }),
+      MSG("g2", "gemini", "done"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["u1", "user"],
+      ["g1", "assistant"], // the call renders here, from the functionCall part…
+      ["u2", "tool"], // …and the tool row carries ONLY the unrecorded response
+      ["g2", "assistant"],
+    ]);
+    expect(r!.session.messages[1].toolCalls).toEqual([{ name: "glob", input: "**/*.ts" }]);
+    expect(r!.session.messages[2].toolCalls).toEqual([{ name: "read_file", input: "" }]);
+  });
+
+  it("reseed merge keeps pre-compaction turns in place, appends the snapshot, recovers array text", async () => {
+    const p = writeSession("h-reseed", "session-reseed.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "first question"),
+      MSG("g0", "gemini", "pre-compaction answer"), // compressed away — NOT in the reseed
+      MSG("u2", "user", "second question"),
+      MSG("g1", "gemini", "will be reseeded"),
+      JSON.stringify({ $set: { messages: [
+        { id: "u2", type: "user", timestamp: "2026-06-19T11:45:00.000Z", content: [{ text: "second question" }] },
+        { id: "g1", type: "gemini", timestamp: "2026-06-19T11:45:05.000Z", model: "gemini-2.5-pro",
+          content: [{ text: "answer recovered from parts array" }] },
+        { id: "s1", type: "user", timestamp: "2026-06-19T11:46:00.000Z", content: [{ text: STATE_SNAPSHOT }] },
+      ] } }),
+      MSG("u3", "user", "post-compaction question"),
+      MSG("g2", "gemini", "post-compaction answer"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    // chronologically sane: pre-compaction turns (original positions), then the snapshot
+    // (new id → appends at the reseed), then post-compaction turns
+    expect(r!.session.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["u1", "user"],
+      ["g0", "assistant"], // absent from the reseed, but its record is earlier in the log — SURVIVES
+      ["u2", "user"],
+      ["g1", "assistant"],
+      ["s1", "system"], // <state_snapshot> → muted system row, as usual
+      ["u3", "user"],
+      ["g2", "assistant"],
+    ]);
+    expect(r!.session.messages[1].text).toBe("pre-compaction answer");
+    expect(r!.session.messages[3].text).toBe("answer recovered from parts array");
+    expect(r!.session.messages.map((m) => m.seq)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("end-to-end: the reseeded work-session shape yields assistant turns WITH text", async () => {
+    // Pre-fix this parsed as "me, me" with no answers: every gemini turn array-content →
+    // "" → dropped. Post-fix: user, assistant(tool chip), assistant(text).
+    const p = writeSession("h-e2e", "session-e2e.jsonl", [
+      HDR("s"),
+      JSON.stringify({ $set: { messages: [
+        { id: "u1", type: "user", content: [{ text: "where do the session files live?" }] },
+        { id: "g1", type: "gemini", content: [
+          { thought: true, text: "HIDDEN PLANNING" },
+          { functionCall: { id: "c1", name: "read_file", args: { absolute_path: "/x.ts" } } },
+        ] },
+        { id: "u2", type: "user", content: [FR("c1", "read_file")] }, // fully deduped away
+        { id: "g2", type: "gemini", content: [{ text: "They live under ~/.gemini/tmp." }] },
+      ] } }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["u1", "user"],
+      ["g1", "assistant"], // kept: empty text but a real functionCall-derived chip
+      ["g2", "assistant"],
+    ]);
+    expect(r!.session.messages[1].toolCalls).toEqual([{ name: "read_file", input: "/x.ts" }]);
+    expect(r!.session.messages[2].text).toBe("They live under ~/.gemini/tmp.");
+    const json = JSON.stringify(r!.session.messages);
+    expect(json).not.toContain("HIDDEN PLANNING");
+    expect(json).not.toContain("NEVER CAPTURED");
   });
 });

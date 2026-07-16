@@ -2,8 +2,16 @@
 # Replay gemini .jsonl mutation logs the way trove's adapter does, and report
 # every event that REMOVES or EMPTIES a message — for the "responses show in raw
 # view but not in the reader" case: the file provably holds the text, so some
-# later record (empty-content re-push, $rewindTo, or a mid-file $set.messages
-# reseed) must be eating it during replay. Names the record, by line number.
+# later record (empty-content re-push or $rewindTo) must be eating it during
+# replay. Names the record, by line number.
+#
+# MIRROR CONTRACT: this replay MUST match replaySessionLog in
+# packages/core/src/adapters/gemini-cli.ts branch-for-branch — including the
+# reseed-as-MERGE semantics ($set.messages upserts by id; it does NOT clear) and
+# thought-part-aware text extraction. If you change the adapter, change this
+# script (and vice versa), or the diagnostic silently starts lying. Post-merge,
+# an "eaten" id means genuinely lost text (a rewind or a true clobber), never a
+# compaction reseed.
 #
 # CONTENT-SAFE: prints ids, line numbers, types, text LENGTHS and key names only.
 #
@@ -22,11 +30,12 @@ const summary = !!process.env.SUMMARY;
 const lines = fs.readFileSync(file, "utf8").split("\n").filter(l => l.trim());
 
 // text length of a record, mirroring what the adapter would extract
+// (thought-flagged parts are reasoning, not answer text — the adapter skips them)
 const tlen = (r) => {
   if (!r || typeof r !== "object") return 0;
   if (typeof r.content === "string") return r.content.length;
   if (Array.isArray(r.content))
-    return r.content.reduce((n, p) => n + (p && typeof p.text === "string" ? p.text.length : 0), 0);
+    return r.content.reduce((n, p) => n + (p && !p.thought && typeof p.text === "string" ? p.text.length : 0), 0);
   return 0;
 };
 
@@ -74,11 +83,21 @@ lines.forEach((l, i) => {
     messages.set(r.id, r);
   } else if (r.$set && typeof r.$set === "object") {
     if (Array.isArray(r.$set.messages)) {
+      // RESEED — MERGE, not replace (mirror of the adapter, see header comment):
+      // upsert each seeded message by id; ids absent from the reseed survive.
       counts.reseed++;
-      const hadText = [...messages.values()].filter(m => tlen(m) > 0).length;
-      events.push(`line ${ln}: RESEED clears ${messages.size} accumulated (${hadText} with text) then:`);
-      messages.clear();
-      seed(r.$set.messages, "RESEED", ln);
+      const before = messages.size;
+      let newIds = 0, withText = 0;
+      for (const m of r.$set.messages) {
+        if (m && typeof m === "object" && typeof m.id === "string") {
+          if (!messages.has(m.id)) newIds++;
+          messages.set(m.id, m);
+          const L = tlen(m);
+          if (L > (maxLen.get(m.id) ?? 0)) maxLen.set(m.id, L);
+          if (L > 0) withText++;
+        }
+      }
+      events.push(`line ${ln}: RESEED merges ${r.$set.messages.length} seeded (${newIds} new ids, ${withText} with text) into ${before} accumulated`);
     } else counts.setMeta++;
   } else if (typeof r.sessionId === "string" && typeof r.projectHash === "string") {
     counts.header++;
@@ -87,13 +106,14 @@ lines.forEach((l, i) => {
 });
 
 const legacy = counts.bad > lines.length * 0.9;
+// post-merge, "eaten" = genuinely lost text: a rewind or a true clobber — never a reseed
 const eaten = [...maxLen.entries()].filter(([id, mx]) => mx > 0 && tlen(messages.get(id)) === 0);
-const destructive = events.filter(e => /CLOBBER|REWIND|RESEED/.test(e)).length;
+const notable = events.filter(e => /CLOBBER|REWIND|RESEED/.test(e)).length;
 
 if (summary) {
   const name = file.split("/").slice(-1)[0];
   if (legacy) console.log(`  legacy .json-style — skipped              ${name}`);
-  else console.log(`  eaten:${String(eaten.length).padStart(3)}  events:${String(destructive).padStart(3)}  msgs:${String(messages.size).padStart(4)}  ${name}${eaten.length > 0 ? "  <<<" : ""}`);
+  else console.log(`  eaten:${String(eaten.length).padStart(3)}  events:${String(notable).padStart(3)}  msgs:${String(messages.size).padStart(4)}  ${name}${eaten.length > 0 ? "  <<<" : ""}`);
   process.exit(0);
 }
 
@@ -105,7 +125,7 @@ if (legacy) {
   process.exit(0);
 }
 
-console.log("\n== destructive events (this is the list that matters) ==");
+console.log("\n== replay events (REWIND/CLOBBER lose text; RESEED merges, informational) ==");
 const shown = events.filter(e => /CLOBBER|REWIND|RESEED/.test(e));
 if (shown.length === 0) console.log("  none — replay loses nothing; the eater is elsewhere");
 for (const e of shown.slice(0, 30)) console.log("  " + e);
