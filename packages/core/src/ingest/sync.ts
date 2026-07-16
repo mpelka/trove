@@ -34,6 +34,10 @@ function sanitize(s: string): string {
   return s.replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
+/** Rows per bulk message INSERT: 8 bound params each, kept well under SQLite's
+ *  ~32k parameter budget (1000 × 8 = 8k). See the chunk loop in sync(). */
+const MESSAGE_INSERT_CHUNK = 1000;
+
 /** Incremental, idempotent sync across the given adapters. Safe to run repeatedly. */
 export async function sync(
   db: Database,
@@ -228,10 +232,14 @@ export async function sync(
           .values({ id, importedAt: now, ...common })
           .onConflictDoUpdate({ target: sessions.id, set: common })
           .run();
-        if (s.messages.length > 0) {
+        // Insert messages in chunks: each row binds 8 params, and SQLite's bound-
+        // parameter budget (~32k) overflows around 4k rows in one statement. Sessions
+        // that large are real since the gemini reseed-merge fix — a compaction-heavy
+        // session recovers its whole pre-compaction history (~20k messages observed).
+        for (let at = 0; at < s.messages.length; at += MESSAGE_INSERT_CHUNK) {
           d.insert(messages)
             .values(
-              s.messages.map((m) => ({
+              s.messages.slice(at, at + MESSAGE_INSERT_CHUNK).map((m) => ({
                 uid: m.uid ?? null,
                 sessionId: id,
                 seq: m.seq,

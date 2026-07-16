@@ -300,4 +300,26 @@ describe("sync", () => {
     // and no messages orphaned under the stale id
     expect(messageTexts("fake:old-id")).toEqual([]);
   });
+
+  it("syncs a session larger than one insert chunk without hitting SQLite's param limit", async () => {
+    // Real case: the gemini reseed-merge fix recovers a compaction-heavy session's whole
+    // pre-compaction history (~20k messages observed at 8 bound params per row), which
+    // overflowed SQLite's ~32k parameter budget when inserted as one statement.
+    const { adapter, sources } = makeFake();
+    const many = Array.from({ length: 5000 }, (_, i) =>
+      msg(i, i % 2 === 0 ? "user" : "assistant", `message number ${i}`),
+    );
+    sources.push(source("fake", "big", many));
+
+    const r = await sync(db, [adapter]);
+    expect(r.added).toBe(1);
+    expect(sessionRow("fake:big").message_count).toBe(5000);
+    const texts = messageTexts("fake:big");
+    expect(texts.length).toBe(5000);
+    // chunk boundaries didn't drop, duplicate, or reorder anything
+    expect(texts[0]).toBe("message number 0");
+    expect(texts[999]).toBe("message number 999");
+    expect(texts[1000]).toBe("message number 1000");
+    expect(texts[4999]).toBe("message number 4999");
+  });
 });
