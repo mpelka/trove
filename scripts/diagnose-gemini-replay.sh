@@ -10,7 +10,18 @@
 # Run:  bash scripts/diagnose-gemini-replay.sh ~/.gemini/tmp/<slug>/chats/session-....jsonl
 set -uo pipefail
 FILE="${1:-}"
-if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then echo "usage: $0 <session .jsonl>"; exit 1; fi
+if [ -z "$FILE" ]; then echo "usage: $0 <session .jsonl>"; exit 1; fi
+if [ ! -f "$FILE" ]; then
+  echo "no such file: $FILE"
+  D=$(dirname "$FILE")
+  if [ -d "$D" ]; then
+    echo "closest names in $D:"
+    ls "$D" 2>/dev/null | grep -i "$(basename "$FILE" | cut -c1-18)" | head -5 | sed 's/^/  /'
+  else
+    echo "directory does not exist either: $D"
+  fi
+  exit 1
+fi
 
 FILE="$FILE" bun -e '
 const fs = require("fs");
@@ -82,6 +93,11 @@ lines.forEach((l, i) => {
 });
 
 console.log(`branches: ${JSON.stringify(counts)}`);
+if (counts.bad > lines.length * 0.9) {
+  console.log("\nnearly every line failed to parse as a JSON record — this looks like a");
+  console.log("pretty-printed legacy .json, not a .jsonl mutation log. Point me at the .jsonl.");
+  process.exit(0);
+}
 console.log("\n== destructive events (this is the list that matters) ==");
 if (events.length === 0) console.log("  none — replay loses nothing; the eater is elsewhere");
 for (const e of events.slice(0, 30)) console.log("  " + e);
