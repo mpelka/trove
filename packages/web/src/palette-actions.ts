@@ -110,14 +110,21 @@ export const PALETTE_GROUPS: { id: PaletteAction["group"]; heading: string }[] =
 ];
 
 // Same agent set (and friendly names) as the sidebar's filter chips.
-export const AGENTS: { id: string; chip: string }[] = [
-  { id: "claude-code", chip: "claude" },
-  { id: "gemini-cli", chip: "gemini" },
-  { id: "copilot", chip: "copilot" },
-  { id: "antigravity", chip: "agy" },
-  { id: "chatgpt", chip: "chatgpt" },
-  { id: "claude-web", chip: "claude.ai" },
+// `chip` is the short chip label; `name` is the full product name (settings menu).
+export const AGENTS: { id: string; chip: string; name: string }[] = [
+  { id: "claude-code", chip: "claude", name: "Claude Code" },
+  { id: "gemini-cli", chip: "gemini", name: "Gemini CLI" },
+  { id: "copilot", chip: "copilot", name: "GitHub Copilot" },
+  { id: "antigravity", chip: "agy", name: "Antigravity" },
+  { id: "chatgpt", chip: "chatgpt", name: "ChatGPT" },
+  { id: "claude-web", chip: "claude.ai", name: "Claude.ai" },
 ];
+
+/** Full product name for an agent id; null for ids outside the registry
+ *  (callers fall back to the short agentLabel so unknown agents still render). */
+export function agentName(id: string): string | null {
+  return AGENTS.find((a) => a.id === id)?.name ?? null;
+}
 
 export const PALETTE_ACTIONS: PaletteAction[] = [
   // ── filters ──

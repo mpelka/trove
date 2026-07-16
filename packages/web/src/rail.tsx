@@ -22,6 +22,7 @@ import { Checkbox } from "./ui/checkbox.tsx";
 import { trpc } from "./trpc.ts";
 import { AgentBadge } from "./rows.tsx";
 import { agentLabel } from "./lib.ts";
+import { agentName } from "./palette-actions.ts";
 
 export function initialTheme(): "light" | "dark" {
   try {
@@ -151,11 +152,12 @@ function SettingsMenu({
                 <Checkbox
                   checked={!hiddenAgents.has(a.agent)}
                   onCheckedChange={() => onToggleAgentHidden(a.agent)}
-                  aria-label={`show ${agentLabel(a.agent)} filter chip`}
+                  aria-label={`show ${agentName(a.agent) ?? agentLabel(a.agent)} filter chip`}
                   title="show filter chip (sessions stay searchable either way)"
                 />
                 <AgentBadge agent={a.agent} />
-                <span className="agent-name">{agentLabel(a.agent)}</span>
+                {/* Full product name (registry); short label only for ids outside it. */}
+                <span className="agent-name">{agentName(a.agent) ?? agentLabel(a.agent)}</span>
                 <b>{a.sessions.toLocaleString()}</b>
               </div>
             ))}
