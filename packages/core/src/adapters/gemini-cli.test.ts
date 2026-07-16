@@ -65,7 +65,8 @@ const MAIN_SESSION = {
     },
     { id: "m3", type: "info", timestamp: "2025-06-01T10:00:06.000Z", content: "switched model" },
     { id: "m4", type: "error", timestamp: "2025-06-01T10:00:07.000Z", content: "quota exceeded" },
-    // user message that is only tool noise → empty text → skipped
+    // user message that is only a functionResponse → surfaced as a tool row (the response
+    // side is sometimes the ONLY persisted trace of tool use — see the tool-row describe)
     {
       id: "m5",
       type: "user",
@@ -94,13 +95,16 @@ describe("geminiCliAdapter.parse", () => {
     expect(s.model).toBe("gemini-2.5-pro");
     expect(s.kind).toBeNull();
 
-    // m1 (text part only), m2, m4 (error → system), m6 survive; info/m5 skipped
-    expect(s.messages.map((m) => m.uid)).toEqual(["m1", "m2", "m4", "m6"]);
-    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant", "system", "user"]);
+    // m1 (text part only), m2, m4 (error → system), m5 (functionResponse → tool row),
+    // m6 survive; info skipped
+    expect(s.messages.map((m) => m.uid)).toEqual(["m1", "m2", "m4", "m5", "m6"]);
+    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant", "system", "tool", "user"]);
     expect(s.messages[0].text).toBe("Hi gemini, review this");
     expect(s.messages[1].text).toBe("Sure, here's my review.");
     expect(s.messages[2].text).toBe("quota exceeded"); // errors explain gaps — keep them
-    expect(s.messages[3].text).toBe("legacy string content");
+    expect(s.messages[3].text).toBe("[used: shell]"); // name-only chip, no response body
+    expect(s.messages[3].toolCalls).toEqual([{ name: "shell", input: "" }]);
+    expect(s.messages[4].text).toBe("legacy string content");
 
     const all = s.messages.map((m) => m.text).join("\n");
     expect(all).not.toContain("TOOL BODY DROPPED");
@@ -549,7 +553,7 @@ describe("gemini-cli recorded toolCalls", () => {
     expect(JSON.stringify(r!.session.messages)).not.toContain("SECRET");
   });
 
-  it("still drops a user message with only functionResponse parts (.jsonl path)", async () => {
+  it("surfaces a functionResponse-only user message as a tool row, never its body (.jsonl path)", async () => {
     const p = writeSession("h-fr", "session-fr.jsonl", [
       HDR("s"),
       MSG("m1", "user", "go"),
@@ -557,7 +561,13 @@ describe("gemini-cli recorded toolCalls", () => {
       MSG("m3", "gemini", "done"),
     ].join("\n"));
     const r = await geminiCliAdapter.parse(refFor(p));
-    expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1", "m3"]);
+    expect(r!.session.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["m1", "user"],
+      ["m2", "tool"],
+      ["m3", "assistant"],
+    ]);
+    expect(r!.session.messages[1].toolCalls).toEqual([{ name: "shell", input: "" }]);
+    expect(JSON.stringify(r!.session.messages)).not.toContain("TOOL BODY");
   });
 });
 
@@ -598,5 +608,181 @@ describe("gemini-cli error records", () => {
     ].join("\n"));
     const r = await geminiCliAdapter.parse(refFor(p));
     expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1"]);
+  });
+});
+
+// ── harness-injected turns from a REAL 0.44.1 agentic .jsonl (work machine) ──
+// Observed on-disk: gemini's compression/resume artifact (<state_snapshot>) and the CLI's
+// workspace announcement both arrive as type:"user" records; the CALL side of tool use was
+// never persisted (gemini turns carry only thoughts, NO toolCalls field), so the
+// functionResponse parts on user-type records are the only trace tools ran. Pre-fix the
+// session rendered as "me, me, me, me, gemini" with zero tool calls.
+const STATE_SNAPSHOT = `<state_snapshot>
+## Conversation so far
+The user asked about the failing sync; we inspected packages/core and found the bug.
+</state_snapshot>`;
+
+const WORKSPACE_MSG =
+  "- **Workspace Directories:**\n  - /home/m025699/projects/apps/trove\n- **Today:** 2026-07-15";
+
+describe("gemini-cli <state_snapshot> and workspace announcements", () => {
+  it("turns a <state_snapshot> user message into a system row, text preserved", async () => {
+    const p = writeSession("h-snap", "session-snap.jsonl", [
+      HDR("s"),
+      JSON.stringify({ id: "snap", type: "user", timestamp: "2026-07-15T09:00:00.000Z", content: [{ text: STATE_SNAPSHOT }] }),
+      MSG("m1", "user", "carry on from there"),
+      MSG("m2", "gemini", "Picking up where we left off."),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["snap", "system"], // informative but not the human — muted row, NOT dropped
+      ["m1", "user"],
+      ["m2", "assistant"],
+    ]);
+    expect(r!.session.messages[0].text).toBe(STATE_SNAPSHOT); // summary text kept
+  });
+
+  it("drops the workspace-directories announcement as synthetic (.jsonl)", async () => {
+    const p = writeSession("h-ws", "session-ws.jsonl", [
+      HDR("s"),
+      JSON.stringify({ id: "ws", type: "user", content: [{ text: WORKSPACE_MSG }] }),
+      MSG("m1", "user", "real question"),
+      MSG("m2", "gemini", "real answer"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => m.uid)).toEqual(["m1", "m2"]);
+    expect(JSON.stringify(r!.session.messages)).not.toContain("Workspace Directories");
+  });
+
+  it("keeps a real message that merely MENTIONS workspace directories mid-text", async () => {
+    const p = writeSession("h-ws2", "session-ws2.jsonl", [
+      HDR("s"),
+      MSG("m1", "user", "why are the - **Workspace Directories:** wrong in trove?"),
+      MSG("m2", "gemini", "because…"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    // only a message STARTING with the marker is synthetic
+    expect(r!.session.messages[0].text).toBe("why are the - **Workspace Directories:** wrong in trove?");
+  });
+});
+
+// ── functionResponse-derived tool rows + dedup against recorded toolCalls ────
+describe("gemini-cli functionResponse tool rows", () => {
+  const FR = (id: string | null, name: string) =>
+    ({ functionResponse: { ...(id ? { id } : {}), name, response: { output: "NEVER CAPTURED OUTPUT" } } });
+
+  it("maps a functionResponse-only user message to role tool with name-only chips (.json)", async () => {
+    const path = writeSession("h-frj", "session-frj.json", {
+      sessionId: "s",
+      messages: [
+        { id: "u1", type: "user", timestamp: "2026-07-15T10:00:00.000Z", content: [{ text: "find the globs" }] },
+        // two responses in ONE message → two entries, order kept
+        { id: "u2", type: "user", timestamp: "2026-07-15T10:00:05.000Z", content: [FR("glob__glob_1783939161358_0", "glob"), FR("read__1", "read_file")] },
+        { id: "g1", type: "gemini", timestamp: "2026-07-15T10:00:09.000Z", content: "Found them." },
+      ],
+    });
+    const r = await geminiCliAdapter.parse(refFor(path));
+    const s = r!.session;
+    expect(s.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["u1", "user"],
+      ["u2", "tool"],
+      ["g1", "assistant"],
+    ]);
+    expect(s.messages[1].toolCalls).toEqual([
+      { name: "glob", input: "" },
+      { name: "read_file", input: "" },
+    ]);
+    expect(s.messages[1].text).toBe("[used: glob, read_file]"); // buildItems derives counts from this
+    expect(JSON.stringify(s.messages)).not.toContain("NEVER CAPTURED OUTPUT"); // blob-safety
+  });
+
+  it("mixed content (typed text + functionResponse part) stays a normal user message", async () => {
+    const p = writeSession("h-frmix", "session-frmix.jsonl", [
+      HDR("s"),
+      JSON.stringify({ id: "u1", type: "user", content: [{ text: "here's the result, now explain it" }, FR("x1", "shell")] }),
+      MSG("g1", "gemini", "sure"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    // text wins — don't reclassify the human
+    expect(r!.session.messages[0].role).toBe("user");
+    expect(r!.session.messages[0].text).toBe("here's the result, now explain it");
+    expect(r!.session.messages[0].toolCalls).toBeUndefined();
+  });
+
+  it("dedups functionResponses whose id was recorded in a gemini toolCalls entry", async () => {
+    const p = writeSession("h-frdedup", "session-frdedup.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "go"),
+      // the call side WAS recorded here (id tcX) …
+      JSON.stringify({ id: "g1", type: "gemini", content: "", toolCalls: [{ id: "tcX", name: "run_shell_command", displayName: "Shell", args: { command: "ls" } }] }),
+      // … so its functionResponse must NOT synthesize a second row; the unknown id tcY must
+      JSON.stringify({ id: "u2", type: "user", content: [FR("tcX", "run_shell_command"), FR("tcY", "glob")] }),
+      MSG("g2", "gemini", "done"),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    expect(r!.session.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["u1", "user"],
+      ["g1", "assistant"], // the recorded call renders here…
+      ["u2", "tool"], // …and the tool row carries ONLY the unrecorded one
+      ["g2", "assistant"],
+    ]);
+    expect(r!.session.messages[1].toolCalls).toEqual([{ name: "Shell", input: "ls" }]);
+    expect(r!.session.messages[2].toolCalls).toEqual([{ name: "glob", input: "" }]);
+  });
+
+  it("dedups even when the recorded toolCalls appear AFTER the functionResponse (replay order)", async () => {
+    const p = writeSession("h-frlate", "session-frlate.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "go"),
+      JSON.stringify({ id: "u2", type: "user", content: [FR("tcZ", "read_file")] }),
+      JSON.stringify({ id: "g1", type: "gemini", content: "read it", toolCalls: [{ id: "tcZ", name: "read_file", args: { absolute_path: "/a.ts" } }] }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    // the pre-pass sees tcZ before the main loop, so u2 fully dedups away
+    expect(r!.session.messages.map((m) => m.uid)).toEqual(["u1", "g1"]);
+  });
+
+  it("synthesizes an id-less functionResponse (fail toward showing the tool)", async () => {
+    const p = writeSession("h-frnoid", "session-frnoid.jsonl", [
+      HDR("s"),
+      MSG("u1", "user", "go"),
+      JSON.stringify({ id: "g1", type: "gemini", content: "", toolCalls: [{ id: "tc1", name: "shell", args: {} }] }),
+      JSON.stringify({ id: "u2", type: "user", content: [FR(null, "shell")] }),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    // no id → dedup is best-effort → still shown, even though it may be tc1's response
+    expect(r!.session.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+    expect(r!.session.messages[2].toolCalls).toEqual([{ name: "shell", input: "" }]);
+  });
+
+  it("replays the full observed work-machine stream into system/user/tool/assistant", async () => {
+    // The exact record shapes seen on screen in the real 0.44.1 log: snapshot + workspace
+    // as fake users, thought-only gemini turns with NO toolCalls field, functionResponse
+    // users as the only tool trace, then real assistant text.
+    const p = writeSession("h-real", "session-real.jsonl", [
+      HDR("s"),
+      JSON.stringify({ id: "snap", type: "user", content: [{ text: STATE_SNAPSHOT }] }),
+      JSON.stringify({ id: "ws", type: "user", content: [{ text: WORKSPACE_MSG }] }),
+      MSG("u1", "user", "where do the session files live?"),
+      JSON.stringify({ id: "g1", type: "gemini", content: "", thoughts: [{ subject: "Searching", description: "HIDDEN" }] }),
+      JSON.stringify({ id: "u2", type: "user", content: [FR("glob__glob_1783939161358_0", "glob")] }),
+      JSON.stringify({ id: "g2", type: "gemini", content: "", thoughts: [{ subject: "Reading", description: "HIDDEN" }] }),
+      JSON.stringify({ id: "u3", type: "user", content: [FR("read__2", "read_file")] }),
+      MSG("g3", "gemini", "They live under ~/.gemini/tmp."),
+    ].join("\n"));
+    const r = await geminiCliAdapter.parse(refFor(p));
+    // pre-fix this was user,user,user,user,assistant ("me me me") with zero tools
+    expect(r!.session.messages.map((m) => [m.uid, m.role])).toEqual([
+      ["snap", "system"],
+      ["u1", "user"],
+      ["u2", "tool"],
+      ["u3", "tool"],
+      ["g3", "assistant"],
+    ]);
+    expect(r!.session.messages[2].toolCalls).toEqual([{ name: "glob", input: "" }]);
+    expect(r!.session.messages[3].toolCalls).toEqual([{ name: "read_file", input: "" }]);
+    const json = JSON.stringify(r!.session.messages);
+    expect(json).not.toContain("HIDDEN");
+    expect(json).not.toContain("Workspace Directories");
   });
 });

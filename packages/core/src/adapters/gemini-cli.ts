@@ -121,12 +121,29 @@ function resolveProjectFromFile(sourceFile: string): string | null {
  * message, never a wrapper around real input, so dropping it can't lose anything the user
  * typed. Left in, it shows as the human's opening line AND becomes the derived title, which
  * made every affected session look identical in the list.
+ *
+ * `- **Workspace Directories:**` is the CLI's workspace announcement — another whole
+ * message the harness injects as a fake user turn (observed in a real 0.44.1 .jsonl log,
+ * sibling of `<session_context>`). Same treatment: it's the CLI talking to itself, drop it.
  */
-const SYNTHETIC_USER_PREFIXES = ["<session_context>"];
+const SYNTHETIC_USER_PREFIXES = ["<session_context>", "- **Workspace Directories:**"];
 
 function isSyntheticUser(text: string): boolean {
   const t = text.trimStart();
   return SYNTHETIC_USER_PREFIXES.some((p) => t.startsWith(p));
+}
+
+/**
+ * `<state_snapshot>` is gemini's compression/resume artifact — a summary of the truncated
+ * history injected as a fake user turn (observed in a real 0.44.1 .jsonl log). Unlike the
+ * SYNTHETIC_USER_PREFIXES it is NOT dropped: it's informative (what the model was told the
+ * past looked like), just not the human talking — so it becomes a muted system row, the
+ * same way CC compaction summaries render.
+ */
+const STATE_SNAPSHOT_PREFIX = "<state_snapshot>";
+
+function isStateSnapshot(text: string): boolean {
+  return text.trimStart().startsWith(STATE_SNAPSHOT_PREFIX);
 }
 
 /** Extract the "meat" from one user message.content array: keep `text` parts,
@@ -150,6 +167,59 @@ function extractUserText(content: unknown): string {
     if (typeof p.text === "string" && p.text.trim()) prose.push(p.text.trim());
   }
   return prose.join("\n\n");
+}
+
+/**
+ * Pre-pass: collect the ids of every tool call RECORDED on gemini messages, across the
+ * whole session. Needed to dedup the functionResponse fallback below — when gemini did
+ * record `toolCalls`, the same calls' functionResponses are also present on user-type
+ * messages, and without this set every call would render twice. A whole-session pass
+ * (not a running set) because replay order means a call's `toolCalls` may be recorded on
+ * a message that appears before OR after its functionResponse.
+ */
+function collectRecordedToolCallIds(rawMessages: unknown): Set<string> {
+  const ids = new Set<string>();
+  if (!Array.isArray(rawMessages)) return ids;
+  for (const raw of rawMessages) {
+    if (!raw || typeof raw !== "object") continue;
+    const m = raw as GeminiMessage;
+    if (m.type !== "gemini" || !Array.isArray(m.toolCalls)) continue;
+    for (const entry of m.toolCalls) {
+      if (!entry || typeof entry !== "object") continue;
+      const id = (entry as Record<string, unknown>).id;
+      if (typeof id === "string" && id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Fallback tool-call records synthesized from a user message's `functionResponse` parts.
+ *
+ * In some real 0.44.1 sessions (observed on-disk) the CALL side of tool use is never
+ * persisted — gemini turns carry only `thoughts` and no `toolCalls` field at all — so the
+ * functionResponse parts on the following user-type message are the ONLY trace that tools
+ * ran. Each part looks like `{functionResponse: {id, name, response: {output: …}}}`. We
+ * keep just the name (name-only chips); `response` bodies are exactly the blobs types.ts
+ * forbids capturing. Parts whose id is in `recordedIds` are skipped (already shown via the
+ * gemini turn's recorded toolCalls); a part with NO id is synthesized anyway — fail toward
+ * showing the tool, dedup is best-effort.
+ */
+function toolCallsFromFunctionResponses(content: unknown, recordedIds: Set<string>): ToolCall[] {
+  if (!Array.isArray(content)) return [];
+  const out: ToolCall[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const fr = (part as Record<string, unknown>).functionResponse;
+    if (!fr || typeof fr !== "object") continue;
+    const f = fr as Record<string, unknown>;
+    const id = typeof f.id === "string" && f.id ? f.id : null;
+    if (id && recordedIds.has(id)) continue; // the call side was recorded — don't show twice
+    const name = typeof f.name === "string" && f.name.trim() ? f.name.trim() : null;
+    if (!name) continue; // no usable name → nothing showable
+    out.push({ name, input: "" });
+  }
+  return out;
 }
 
 /**
@@ -320,6 +390,10 @@ export const geminiCliAdapter: Adapter = {
     let minTs = Infinity;
     let maxTs = -Infinity;
 
+    // Whole-session pre-pass (see collectRecordedToolCallIds): which call ids already
+    // have a recorded `toolCalls` entry, so the functionResponse fallback can dedup.
+    const recordedToolCallIds = collectRecordedToolCallIds(rawMessages);
+
     if (Array.isArray(rawMessages)) {
       for (const raw of rawMessages) {
         if (!raw || typeof raw !== "object") continue;
@@ -340,10 +414,28 @@ export const geminiCliAdapter: Adapter = {
           // agentic assistant turn, leaving long runs of user messages.
           toolCalls = extractToolCalls(m.toolCalls);
         } else if (t === "user") {
-          role = "user";
           text = extractUserText(m.content);
-          // Drop the CLI's own environment preamble — not the human talking.
+          // Drop the CLI's own harness-injected turns — not the human talking.
           if (isSyntheticUser(text)) continue;
+          if (!text) {
+            // No typed text at all. If the parts carry functionResponses this is the
+            // response side of tool use — and in sessions where gemini never recorded
+            // the call side, the only trace tools ran. Surface it as a tool row
+            // (name-only chips, deduped against recorded toolCalls). Text wins: a real
+            // user message that merely includes a functionResponse part stays "user".
+            toolCalls = toolCallsFromFunctionResponses(m.content, recordedToolCallIds);
+            if (toolCalls.length === 0) continue; // pure noise (or fully deduped) — skip
+            role = "tool";
+            // Same `[used: …]` marker convention as the CC adapter: buildItems derives
+            // the strip's grouped counts from this text.
+            text = `[used: ${[...new Set(toolCalls.map((c) => c.name))].join(", ")}]`;
+          } else if (isStateSnapshot(text)) {
+            // Compression/resume summary — informative, but not the human. Muted
+            // system row, like CC compaction turns.
+            role = "system";
+          } else {
+            role = "user";
+          }
         } else if (t === "error") {
           role = "system";
           text = typeof m.content === "string" ? m.content.trim() : "";
@@ -359,10 +451,10 @@ export const geminiCliAdapter: Adapter = {
           maxTs = Math.max(maxTs, ts);
         }
 
-        // A user message with only functionResponse/inlineData yields empty text →
-        // skip it (don't emit empties), exactly like the CC adapter. A gemini message
-        // that is empty AND has no tool calls (thought-only turn) is likewise skipped —
-        // but an empty one WITH tool calls is a real assistant turn and stays.
+        // A gemini message that is empty AND has no tool calls (thought-only turn) is
+        // skipped — but an empty one WITH tool calls is a real assistant turn and stays.
+        // (Empty user messages were already handled above: functionResponse parts became
+        // a tool row, anything else — e.g. inlineData only — was dropped.)
         if (!text && toolCalls.length === 0) continue;
 
         messages.push({
