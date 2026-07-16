@@ -145,6 +145,12 @@ describe("action visibility predicates", () => {
     for (const a of AGENTS) expect(() => action(`filter-agent-${a.id}`)).not.toThrow();
   });
 
+  it("clear-search only shows while a search is active", () => {
+    expect(action("clear-search").visible(ctx())).toBe(false);
+    expect(action("clear-search").visible(ctx({ searching: true }))).toBe(true);
+    expect(action("clear-search").visible(ctx({ searching: true, sessionOpen: true }))).toBe(true);
+  });
+
   it("always-on actions: sync, theme, starred, highlights", () => {
     for (const id of ["sync", "theme-toggle", "toggle-starred", "toggle-highlights"]) {
       expect(action(id).visible(ctx())).toBe(true);
@@ -183,6 +189,7 @@ describe("action run() dispatch", () => {
       ["order-toggle", ctx({ order: "asc" }), "setOrder", "desc"],
       ["search-sort-relevance", ctx({ searching: true }), "setSort", "relevance"],
       ["search-sort-recent", ctx({ searching: true, sort: "relevance" }), "setSort", "recent"],
+      ["clear-search", ctx({ searching: true }), "clearSearch"],
       ["sync", ctx(), "sync"],
       ["theme-toggle", ctx(), "toggleTheme"],
       ["expand-toggle", ctx({ sessionOpen: true }), "toggleExpand"],

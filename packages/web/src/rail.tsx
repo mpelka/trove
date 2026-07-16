@@ -5,7 +5,6 @@ import {
   RefreshCw,
   Moon,
   Sun,
-  X,
   Search,
   FoldHorizontal,
   RectangleHorizontal,
@@ -15,6 +14,7 @@ import {
   Rows4,
 } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "./ui/popover.tsx";
+import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip.tsx";
 import { Button } from "./ui/button.tsx";
 import { trpc } from "./trpc.ts";
 import { AgentBadge } from "./rows.tsx";
@@ -101,8 +101,9 @@ function PresetRow({
 }
 
 // ── settings flyout ─────────────────────────────────────────────────────────
-// Theme state lives in App now (the command palette toggles it too); the menu just
-// renders the current value and calls up.
+// Theme state lives in App (the command palette toggles it too); the menu just
+// renders the current value and calls up. Anchored to the rail, so it flies
+// out to the RIGHT instead of dropping down.
 function SettingsMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onToggleTheme(): void }) {
   const qc = useQueryClient();
   const [width, setWidth] = useState(() => readVar("trove-msg-width", WIDTH_DEFAULT));
@@ -113,11 +114,11 @@ function SettingsMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onTog
     <div className="menu">
       <Popover>
         <PopoverTrigger asChild>
-          <button className="iconbtn" aria-label="menu">
+          <button className="iconbtn" aria-label="menu" title="menu">
             <MenuIcon size={16} />
           </button>
         </PopoverTrigger>
-        <PopoverContent side="bottom" align="start" sideOffset={6} className="menu-panel">
+        <PopoverContent side="right" align="start" sideOffset={10} className="menu-panel">
           <div className="st">
             <span>sessions</span>
             <b>{data?.totalSessions ?? "—"}</b>
@@ -185,42 +186,71 @@ function SettingsMenu({ theme, onToggleTheme }: { theme: "light" | "dark"; onTog
   );
 }
 
-// ── slim header ──────────────────────────────────────────────────────────────
-// One ~44px row: menu, wordmark, and a compact palette trigger. The old always-
-// focused search input is gone — the ⌘K palette writes the same ?q state, and the
-// trigger doubles as the visible home of the active query (with a clear button),
-// so search state never becomes invisible.
-export function Header({
+/** An icon button on the rail with a right-side tooltip. */
+function RailButton({
+  label,
+  className,
+  onClick,
+  children,
+}: {
+  label: string;
+  className?: string;
+  onClick(): void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button className={className ?? "iconbtn"} aria-label={label} onClick={onClick}>
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ── icon rail ────────────────────────────────────────────────────────────────
+// A ~48px full-height strip on the far left — the top header's replacement, so
+// the reader gets ALL the vertical space. Top-to-bottom: brand mark, settings
+// menu, palette trigger; theme toggle pinned to the bottom. The trigger no
+// longer displays the query text — while a search is active it carries an
+// accent dot, names the query in its tooltip, and the palette offers a
+// "Clear search" action, so search state stays one glance / one ⌘K away.
+export function Rail({
   query,
-  onClearQuery,
   onOpenPalette,
   hint,
   theme,
   onToggleTheme,
 }: {
   query: string;
-  onClearQuery(): void;
   onOpenPalette(): void;
   hint: string; // platform-correct shortcut label (⌘K / Ctrl K)
   theme: "light" | "dark";
   onToggleTheme(): void;
 }) {
   return (
-    <header className="header">
-      <SettingsMenu theme={theme} onToggleTheme={onToggleTheme} />
-      <div className="brand">
-        trove<span className="dot">.</span>
+    <nav className="rail" aria-label="app">
+      <div className="rail-brand" title="trove" aria-hidden="true">
+        t<span className="dot">.</span>
       </div>
-      <button className="palette-btn" title={`Search (${hint})`} onClick={onOpenPalette}>
-        <Search size={13} />
-        <span className={`palette-q${query ? " active" : ""}`}>{query || "Search…"}</span>
-        <kbd>{hint}</kbd>
-      </button>
-      {query && (
-        <button className="iconbtn palette-clear" aria-label="clear search" title="clear search" onClick={onClearQuery}>
-          <X size={14} />
-        </button>
-      )}
-    </header>
+      <SettingsMenu theme={theme} onToggleTheme={onToggleTheme} />
+      <RailButton
+        label={query ? `Searching “${query}” — ${hint}` : `Search (${hint})`}
+        className="iconbtn rail-search"
+        onClick={onOpenPalette}
+      >
+        <Search size={15} />
+        {query && <span className="qdot" aria-hidden="true" />}
+      </RailButton>
+      <div className="rail-spacer" />
+      <RailButton
+        label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+        onClick={onToggleTheme}
+      >
+        {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
+      </RailButton>
+    </nav>
   );
 }

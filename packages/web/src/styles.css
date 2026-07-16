@@ -22,6 +22,9 @@
   --dim-2: oklch(70.8% 0 0);
   --accent: oklch(57.72% 0.2324 260);
   --accent-soft: oklch(97% 0 0);
+  /* selected-row background: an unmistakable accent-hued tint (accent-soft is too
+     close to the panel to read as "selected" at a glance) */
+  --sel-bg: oklch(93.5% 0.045 260);
   --danger: oklch(63.7% 0.237 25.331);
   --star: oklch(81.5% 0.197 76);
   /* component-only tokens: hairline outlines, and the near-black/near-white pair
@@ -33,6 +36,10 @@
   /* role accents for message dots / who-lines (semantic, mode-aware) */
   --user: light-dark(oklch(58% 0.13 150), oklch(80% 0.16 145));
   --assistant: var(--accent);
+  /* the user chat bubble: tinted toward --user's green so your own turns pop from
+     the pane (panel-2/border-soft were near-invisible against the bg in both modes) */
+  --user-bubble: light-dark(oklch(95.5% 0.035 150), oklch(24% 0.045 150));
+  --user-bubble-border: light-dark(oklch(83% 0.08 150), oklch(42% 0.09 150));
 }
 
 /* Only the values that actually differ in dark; --star and --user are mode-agnostic. */
@@ -48,6 +55,7 @@
   --dim-2: oklch(55.6% 0 0);
   --accent: color-mix(in oklch, oklch(57.72% 0.2324 260), black 10%);
   --accent-soft: oklch(26.9% 0 0);
+  --sel-bg: oklch(30% 0.07 260);
   --danger: oklch(57.7% 0.245 27.325);
   --fill: oklch(26.9% 0 0);
   --contrast: oklch(98.5% 0 0);
@@ -110,32 +118,29 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
-/* isolation: contain the sticky header's z-index inside .app so the body-level
+/* isolation: contain the sticky detail head's z-index inside .app so the body-level
    dialog portal (backdrop + modal) always paints above it — otherwise the positive-z
-   header bleeds over the modal backdrop (both share the root stacking context). */
-.app { display: flex; flex-direction: column; height: 100%; isolation: isolate; }
+   sticky bleeds over the modal backdrop (both share the root stacking context). */
+.app { display: flex; height: 100%; isolation: isolate; }
 
-/* Header: one slim (~44px) row — settings menu + brand + the ⌘K palette trigger */
-.header { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
-.brand { font-weight: 700; letter-spacing: 0.02em; font-size: 15px; flex: none; }
-.brand .dot { color: var(--accent); }
-
-/* palette trigger: a button dressed like a tiny search field; when a query is live
-   it displays that query (the old input's job), with a separate ✕ to clear. */
-.palette-btn {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
-  height: 30px; padding: 0 7px 0 10px; min-width: 0; max-width: 360px;
-  border-radius: 7px; border: 1px solid var(--border); background: var(--panel-2);
-  color: var(--dim-2); font-size: 12px; cursor: pointer;
+/* Icon rail: the top header's replacement — a full-height ~48px strip on the far
+   left (brand mark, settings menu, palette trigger; theme toggle pinned bottom),
+   so the panes get every pixel of vertical space. */
+.rail {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: 48px; flex: none; padding: 10px 0 12px;
+  border-right: 1px solid var(--border); background: var(--panel);
 }
-.palette-btn:hover { color: var(--text); border-color: var(--dim-2); }
-.palette-btn .palette-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.palette-btn .palette-q.active { color: var(--text); font-weight: 600; }
-.palette-btn kbd {
-  font-family: var(--mono); font-size: 10px; line-height: 1; color: var(--dim-2);
-  border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; background: var(--panel);
+.rail-brand { font-weight: 700; letter-spacing: 0.02em; font-size: 15px; line-height: 1; margin-bottom: 2px; cursor: default; user-select: none; }
+.rail-brand .dot { color: var(--accent); }
+.rail-spacer { flex: 1; }
+/* active-search marker: the rail trigger doesn't show the query text, so an accent
+   dot flags that a query is live (the tooltip names it; ⌘K → "Clear search" clears). */
+.rail-search { position: relative; }
+.rail-search .qdot {
+  position: absolute; top: 3px; right: 3px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent); border: 1.5px solid var(--panel);
 }
-.palette-clear { flex: none; }
 
 /* command palette dialog: Raycast-style upper band, flush panel (the Command inside
    owns all padding). Unlayered, so it beats DialogContent's centering/padding
@@ -201,7 +206,7 @@ body {
 .list { overflow-y: auto; flex: 1; min-height: 0; }
 .row { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
 .row:hover { background: var(--panel-2); }
-.row.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.row.sel { background: var(--sel-bg); box-shadow: inset 3px 0 0 var(--accent); }
 .row .top { display: flex; align-items: center; gap: 8px; }
 .row .name { font-weight: 600; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .star { color: var(--dim-2); cursor: pointer; font-size: 13px; display: inline-flex; }
@@ -235,7 +240,7 @@ body {
 .row.idrow .name, .row.idrow svg { color: var(--accent); font-weight: 600; }
 
 /* user turns as a faux chat bubble so they stand out from assistant/tool */
-.msg.user { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 12px; padding: 8px 14px 10px; margin: 6px 0 6px 28px; }
+.msg.user { background: var(--user-bubble); border: 1px solid var(--user-bubble-border); border-radius: 12px; padding: 8px 14px 10px; margin: 6px 0 6px 28px; }
 
 /* system turns (compaction summaries etc.) — harness-written, never "you" */
 .msg.system { background: var(--accent-soft); border: 1px solid var(--border-soft); border-radius: 12px; padding: 8px 14px 10px; margin: 6px 0; }
@@ -288,9 +293,10 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 
 /* ── compact detail head ─────────────────────────────────────────────────── */
 .detail-empty { color: var(--dim-2); padding: 48px; text-align: center; }
-/* min-height keeps the two pane headers' bottom edges aligned (matching .sidebar-top);
-   shadow parity with the sidebar's filter bar. */
-.detail-head { padding: 10px 18px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 1; min-height: 98px; box-shadow: 0 5px 7px -6px rgba(0, 0, 0, 0.22); }
+/* One compact row: title + icon actions. (Session metadata lives in the info panel;
+   the old min-height that padded this out to match .sidebar-top is gone — reader
+   space wins over cross-pane edge alignment.) Shadow parity with the filter bar. */
+.detail-head { padding: 8px 18px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 1; box-shadow: 0 5px 7px -6px rgba(0, 0, 0, 0.22); }
 .dh-title { display: flex; align-items: center; gap: 8px; }
 .dh-title .title { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
 .dh-title input { font-size: 15px; font-weight: 700; background: var(--panel-2); border: 1px solid var(--accent); color: var(--text); border-radius: 6px; padding: 3px 8px; flex: 1; min-width: 0; }
@@ -482,7 +488,7 @@ mark.hl:hover { filter: brightness(0.94); text-decoration: line-through; }
 .iconbtn.raw-on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
 /* Settings flyout panel: a heavier drop shadow than the popover default, so it reads
-   as lifted off the header. Stacking is handled by the component (z-50, which Radix
+   as lifted off the rail. Stacking is handled by the component (z-50, which Radix
    also mirrors onto its positioner). */
 .menu-panel {
   background: var(--panel);

@@ -7,7 +7,7 @@ import { useQueryState, parseAsString, parseAsBoolean, parseAsInteger, parseAsSt
 import { Divider } from "./divider.tsx";
 import { TooltipProvider } from "./ui/tooltip.tsx";
 import { queryClient, trpc } from "./trpc.ts";
-import { Header, initialTheme } from "./header.tsx";
+import { Rail, initialTheme } from "./rail.tsx";
 import { Sidebar, type Selected } from "./sidebar.tsx";
 import { Detail } from "./detail.tsx";
 import { CommandPalette } from "./command-palette.tsx";
@@ -153,6 +153,7 @@ function App() {
     setOrder: (v) => setOrder(v),
     setSort: (v) => setSort(v),
     sync: () => sync.mutate(),
+    clearSearch: () => setQuery(null),
     toggleTheme,
     toggleExpand: () => setExpandAll((v) => !v),
     toggleRaw: () => setRawOpen((v) => !v),
@@ -165,9 +166,8 @@ function App() {
 
   return (
     <div className="app">
-      <Header
+      <Rail
         query={query}
-        onClearQuery={() => setQuery(null)}
         onOpenPalette={() => setPaletteOpen(true)}
         hint={shortcutHint(MAC)}
         theme={theme}

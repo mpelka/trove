@@ -83,6 +83,7 @@ export type PaletteHandlers = {
   setBsort(v: "updated" | "created"): void;
   setOrder(v: "desc" | "asc"): void;
   setSort(v: "relevance" | "recent"): void;
+  clearSearch(): void;
   sync(): void;
   toggleTheme(): void;
   toggleExpand(): void;
@@ -146,6 +147,15 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
     label: (ctx) => (ctx.hlView ? "Exit highlights view" : "Browse highlights"),
     visible: () => true,
     run: (_ctx, h) => h.toggleHighlights(),
+  },
+  // The rail's search trigger no longer shows the query text (just an accent dot),
+  // so clearing an active search must stay one ⌘K away.
+  {
+    id: "clear-search",
+    group: "filters",
+    label: () => "Clear search",
+    visible: (ctx) => ctx.searching,
+    run: (_ctx, h) => h.clearSearch(),
   },
   // ── sort (browse sort only makes sense when the list isn't showing search hits) ──
   {
