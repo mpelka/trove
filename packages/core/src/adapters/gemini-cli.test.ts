@@ -196,32 +196,58 @@ describe("geminiCliAdapter.enumerate", () => {
 });
 
 describe("geminiCliAdapter.buildResumeCommand", () => {
-  it("returns null without a raw archive (slim copy can't round-trip)", () => {
+  it("returns null with neither a live source nor an archive", () => {
     expect(geminiCliAdapter.buildResumeCommand!({ nativeId: "session-x" })).toBeNull();
     expect(
       geminiCliAdapter.buildResumeCommand!({ nativeId: "session-x", projectPath: "/p" }),
     ).toBeNull();
   });
 
-  it("decompresses the raw archive to a temp file and resumes via --session-file", () => {
-    const cmd = geminiCliAdapter.buildResumeCommand!({
-      nativeId: "session-x",
-      rawPath: "/Users/x/.trove/archive/gem.json.gz",
-    })!;
-    expect(cmd).toContain("RAW=$(mktemp /tmp/trove-resume-XXXXXX.json)");
-    expect(cmd).toContain("gunzip -c '/Users/x/.trove/archive/gem.json.gz' > \"$RAW\"");
-    expect(cmd).toContain('gemini --session-file "$RAW"');
-    expect(cmd).not.toContain("cd "); // no project prefix when projectPath is absent
-  });
-
-  it("prefixes a cd into the project when projectPath is given (shell-quoted)", () => {
+  it("prefers a clean one-liner against the LIVE source (no gunzip dance)", () => {
     const cmd = geminiCliAdapter.buildResumeCommand!({
       nativeId: "session-x",
       projectPath: "/Users/x/my proj",
-      rawPath: "/a/b.json.gz",
+      sourcePath: "/Users/x/.gemini/tmp/proj/chats/session-x.jsonl",
+      rawPath: "/a/b.jsonl.gz", // present, but the live file wins
+    })!;
+    expect(cmd).toBe(
+      "cd '/Users/x/my proj' && gemini --session-file '/Users/x/.gemini/tmp/proj/chats/session-x.jsonl'",
+    );
+    expect(cmd).not.toContain("gunzip");
+    expect(cmd).not.toContain("mktemp");
+  });
+
+  it("resumes the live source with no project prefix when projectPath is absent", () => {
+    const cmd = geminiCliAdapter.buildResumeCommand!({
+      nativeId: "session-x",
+      sourcePath: "/s/session-x.jsonl",
+    })!;
+    expect(cmd).toBe("gemini --session-file '/s/session-x.jsonl'");
+    expect(cmd).not.toContain("cd ");
+  });
+
+  it("falls back to the gunzip dance when the source is gone but an archive was kept", () => {
+    const cmd = geminiCliAdapter.buildResumeCommand!({
+      nativeId: "session-x",
+      projectPath: "/Users/x/my proj",
+      sourcePath: "/Users/x/.gemini/tmp/proj/chats/session-x.jsonl",
+      sourceGone: true, // live file vanished → cannot point at it
+      rawPath: "/a/b.jsonl.gz",
     })!;
     expect(cmd.startsWith("cd '/Users/x/my proj' && ")).toBe(true);
-    expect(cmd).toContain("gunzip -c '/a/b.json.gz'");
+    expect(cmd).toContain("RAW=$(mktemp /tmp/trove-resume-XXXXXX.jsonl)");
+    expect(cmd).toContain("gunzip -c '/a/b.jsonl.gz' > \"$RAW\"");
+    expect(cmd).toContain('gemini --session-file "$RAW"');
+  });
+
+  it("returns null when the source is gone and no archive was kept", () => {
+    expect(
+      geminiCliAdapter.buildResumeCommand!({
+        nativeId: "session-x",
+        sourcePath: "/gone.jsonl",
+        sourceGone: true,
+      }),
+    ).toBeNull();
   });
 });
 

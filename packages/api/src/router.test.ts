@@ -91,9 +91,12 @@ describe("appRouter", () => {
     );
   });
 
-  it("sessionDetail is null-safe for unsupported and unknown agents/ids", async () => {
+  it("builds a live-source gemini resume, and is null-safe for unknown ids", async () => {
     const gem = await caller.sessionDetail({ id: GEM_ID });
-    expect(gem!.resumeCommand).toBeNull(); // gemini resume unsupported
+    // live source present (source_gone = 0) → clean --session-file one-liner into the project
+    expect(gem!.resumeCommand).toBe(
+      "cd '/Users/x/beta' && gemini --session-file '/src/gem.json'",
+    );
     expect(await caller.sessionDetail({ id: "nope:missing" })).toBeNull();
   });
 

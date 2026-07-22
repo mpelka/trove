@@ -68,5 +68,11 @@ export interface Adapter {
     nativeId: string;
     projectPath?: string | null;
     rawPath?: string | null;
+    /** The live on-disk source file, if it still exists (source not gone). Preferred
+     *  over the archived `rawPath` when present — lets adapters emit a clean one-liner
+     *  instead of a decompress-to-temp dance. */
+    sourcePath?: string | null;
+    /** True when the upstream source file has vanished (only the archive remains). */
+    sourceGone?: boolean;
   }): string | null;
 }

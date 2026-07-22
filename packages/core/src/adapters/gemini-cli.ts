@@ -634,16 +634,33 @@ export const geminiCliAdapter: Adapter = {
     return resolveProjectFromFile(file);
   },
 
-  /** Resume via `gemini --session-file`. This needs the *raw* session JSON, so it only
-   *  works when a gzipped raw archive was kept (--keep-raw); we decompress it to a temp
-   *  file first. A slim (raw-less) copy can't round-trip → null. */
+  /** Resume via `gemini --session-file <path>`, prefixed with `cd <project>` so it runs
+   *  in the session's own directory (gemini scopes sessions per project).
+   *
+   *  We deliberately do NOT use `gemini --resume <n>`: that flag takes an ephemeral,
+   *  per-project INDEX (or "latest"), which shifts as sessions come and go — a copied
+   *  `--resume 5` would silently resume the wrong conversation later. `--session-file`
+   *  names the exact session and is stable.
+   *
+   *  Preference order:
+   *   - live source still on disk → point `--session-file` straight at it: a clean
+   *     one-liner, no temp file. This is the common case.
+   *   - source gone but an archived raw was kept (--keep-raw) → decompress the gzip to a
+   *     temp file first (the only way to round-trip a vanished source; gemini's own store
+   *     reaps files, see #10).
+   *   - neither → null (nothing to resume from). */
   buildResumeCommand(input): string | null {
-    if (!input.rawPath) return null;
     const cd = input.projectPath ? `cd ${shellQuote(input.projectPath)} && ` : "";
-    return (
-      `${cd}RAW=$(mktemp /tmp/trove-resume-XXXXXX.json) && ` +
-      `gunzip -c ${shellQuote(input.rawPath)} > "$RAW" && ` +
-      `gemini --session-file "$RAW"`
-    );
+    if (input.sourcePath && !input.sourceGone) {
+      return `${cd}gemini --session-file ${shellQuote(input.sourcePath)}`;
+    }
+    if (input.rawPath) {
+      return (
+        `${cd}RAW=$(mktemp /tmp/trove-resume-XXXXXX.jsonl) && ` +
+        `gunzip -c ${shellQuote(input.rawPath)} > "$RAW" && ` +
+        `gemini --session-file "$RAW"`
+      );
+    }
+    return null;
   },
 };

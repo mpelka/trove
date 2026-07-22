@@ -85,6 +85,8 @@ export const appRouter = router({
         nativeId: detail.session.nativeId,
         projectPath: detail.session.projectPath,
         rawPath: detail.session.rawPath,
+        sourcePath: detail.session.sourcePath,
+        sourceGone: detail.session.sourceGone,
       }) ?? null;
     return { ...detail, resumeCommand };
   }),

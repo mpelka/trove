@@ -171,6 +171,7 @@ export interface SessionDetail {
     tags: string[];
     notes: string | null;
     rawPath: string | null;
+    sourcePath: string | null;
   };
   messages: MessageRow[];
   highlights: SessionHighlight[];
@@ -245,6 +246,7 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
       size_bytes: sessions.sizeBytes,
       source_gone: sessions.sourceGone,
       raw_path: sessions.rawPath,
+      source_path: sessions.sourcePath,
       name: sql<string>`COALESCE(${sessionMeta.customName}, ${sessions.sourceTitle}, ${sessions.nativeId})`,
       custom_name: sessionMeta.customName,
       starred: sql<number>`COALESCE(${sessionMeta.starred}, 0)`,
@@ -293,6 +295,7 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
       tags: s.tags ? (JSON.parse(s.tags) as string[]) : [],
       notes: s.notes,
       rawPath: s.raw_path,
+      sourcePath: s.source_path,
     },
     messages: msgs,
     highlights: highlightsForSession(db, id),
