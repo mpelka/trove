@@ -172,6 +172,9 @@ export interface SessionDetail {
     notes: string | null;
     rawPath: string | null;
     sourcePath: string | null;
+    /** Adapter-specific fields stashed at parse time (JSON `agent_specific`), e.g. gemini's
+     *  `contentSessionId` used to build a `--resume <id>` command. Null if unset/unparseable. */
+    agentSpecific: Record<string, unknown> | null;
   };
   messages: MessageRow[];
   highlights: SessionHighlight[];
@@ -230,6 +233,17 @@ export function lookupId(db: Database, raw: string): IdHit | null {
   return null;
 }
 
+/** Parse the JSON `agent_specific` column to an object; null on empty/garbage (fail soft). */
+function parseAgentSpecific(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getSessionDetail(db: Database, id: string): SessionDetail | null {
   const d = drizzle(db);
   const s = d
@@ -247,6 +261,7 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
       source_gone: sessions.sourceGone,
       raw_path: sessions.rawPath,
       source_path: sessions.sourcePath,
+      agent_specific: sessions.agentSpecific,
       name: sql<string>`COALESCE(${sessionMeta.customName}, ${sessions.sourceTitle}, ${sessions.nativeId})`,
       custom_name: sessionMeta.customName,
       starred: sql<number>`COALESCE(${sessionMeta.starred}, 0)`,
@@ -296,6 +311,7 @@ export function getSessionDetail(db: Database, id: string): SessionDetail | null
       notes: s.notes,
       rawPath: s.raw_path,
       sourcePath: s.source_path,
+      agentSpecific: parseAgentSpecific(s.agent_specific),
     },
     messages: msgs,
     highlights: highlightsForSession(db, id),

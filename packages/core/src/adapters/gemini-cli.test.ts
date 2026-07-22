@@ -196,42 +196,52 @@ describe("geminiCliAdapter.enumerate", () => {
 });
 
 describe("geminiCliAdapter.buildResumeCommand", () => {
-  it("returns null with neither a live source nor an archive", () => {
+  it("returns null with nothing usable to resume from", () => {
     expect(geminiCliAdapter.buildResumeCommand!({ nativeId: "session-x" })).toBeNull();
     expect(
       geminiCliAdapter.buildResumeCommand!({ nativeId: "session-x", projectPath: "/p" }),
     ).toBeNull();
   });
 
-  it("prefers a clean one-liner against the LIVE source (no gunzip dance)", () => {
+  it("prefers a true `--resume <sessionId>` in the project (the id gemini matches)", () => {
+    const cmd = geminiCliAdapter.buildResumeCommand!({
+      nativeId: "proj/session-x",
+      projectPath: "/Users/x/my proj",
+      sourcePath: "/Users/x/.gemini/tmp/proj/chats/session-x.jsonl", // present, but --resume wins
+      agentSpecific: { contentSessionId: "d1d13625-1c51-4eb7-9d57" },
+    })!;
+    expect(cmd).toBe("cd '/Users/x/my proj' && gemini --resume 'd1d13625-1c51-4eb7-9d57'");
+    expect(cmd).not.toContain("session-file");
+  });
+
+  it("falls back to --session-file (import) when there's no sessionId", () => {
     const cmd = geminiCliAdapter.buildResumeCommand!({
       nativeId: "session-x",
       projectPath: "/Users/x/my proj",
       sourcePath: "/Users/x/.gemini/tmp/proj/chats/session-x.jsonl",
-      rawPath: "/a/b.jsonl.gz", // present, but the live file wins
     })!;
     expect(cmd).toBe(
       "cd '/Users/x/my proj' && gemini --session-file '/Users/x/.gemini/tmp/proj/chats/session-x.jsonl'",
     );
     expect(cmd).not.toContain("gunzip");
-    expect(cmd).not.toContain("mktemp");
   });
 
-  it("resumes the live source with no project prefix when projectPath is absent", () => {
+  it("uses --session-file (not --resume) when there's an id but no project to cd into", () => {
+    // --resume only searches the current project's chats, so without a project we can't
+    // safely emit it; the live source works from anywhere.
     const cmd = geminiCliAdapter.buildResumeCommand!({
       nativeId: "session-x",
       sourcePath: "/s/session-x.jsonl",
+      agentSpecific: { contentSessionId: "abc-123" },
     })!;
     expect(cmd).toBe("gemini --session-file '/s/session-x.jsonl'");
-    expect(cmd).not.toContain("cd ");
   });
 
   it("falls back to the gunzip dance when the source is gone but an archive was kept", () => {
     const cmd = geminiCliAdapter.buildResumeCommand!({
       nativeId: "session-x",
       projectPath: "/Users/x/my proj",
-      sourcePath: "/Users/x/.gemini/tmp/proj/chats/session-x.jsonl",
-      sourceGone: true, // live file vanished → cannot point at it
+      sourceGone: true, // live file vanished
       rawPath: "/a/b.jsonl.gz",
     })!;
     expect(cmd.startsWith("cd '/Users/x/my proj' && ")).toBe(true);
@@ -240,11 +250,22 @@ describe("geminiCliAdapter.buildResumeCommand", () => {
     expect(cmd).toContain('gemini --session-file "$RAW"');
   });
 
-  it("returns null when the source is gone and no archive was kept", () => {
+  it("prefers --resume even when the source is gone (the id still resolves in-project)", () => {
+    const cmd = geminiCliAdapter.buildResumeCommand!({
+      nativeId: "session-x",
+      projectPath: "/p",
+      sourceGone: true,
+      rawPath: "/a/b.jsonl.gz",
+      agentSpecific: { contentSessionId: "keeps-working" },
+    })!;
+    expect(cmd).toBe("cd '/p' && gemini --resume 'keeps-working'");
+  });
+
+  it("returns null when the source is gone and no archive or id is available", () => {
     expect(
       geminiCliAdapter.buildResumeCommand!({
         nativeId: "session-x",
-        sourcePath: "/gone.jsonl",
+        projectPath: "/p",
         sourceGone: true,
       }),
     ).toBeNull();

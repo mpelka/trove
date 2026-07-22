@@ -74,5 +74,8 @@ export interface Adapter {
     sourcePath?: string | null;
     /** True when the upstream source file has vanished (only the archive remains). */
     sourceGone?: boolean;
+    /** Adapter-specific fields stashed at parse time (e.g. gemini's `contentSessionId`,
+     *  the UUID `gemini --resume <id>` matches against). */
+    agentSpecific?: Record<string, unknown> | null;
   }): string | null;
 }

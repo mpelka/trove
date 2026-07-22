@@ -87,6 +87,7 @@ export const appRouter = router({
         rawPath: detail.session.rawPath,
         sourcePath: detail.session.sourcePath,
         sourceGone: detail.session.sourceGone,
+        agentSpecific: detail.session.agentSpecific,
       }) ?? null;
     return { ...detail, resumeCommand };
   }),

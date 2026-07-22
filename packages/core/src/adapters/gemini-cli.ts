@@ -634,23 +634,31 @@ export const geminiCliAdapter: Adapter = {
     return resolveProjectFromFile(file);
   },
 
-  /** Resume via `gemini --session-file <path>`, prefixed with `cd <project>` so it runs
-   *  in the session's own directory (gemini scopes sessions per project).
-   *
-   *  We deliberately do NOT use `gemini --resume <n>`: that flag takes an ephemeral,
-   *  per-project INDEX (or "latest"), which shifts as sessions come and go — a copied
-   *  `--resume 5` would silently resume the wrong conversation later. `--session-file`
-   *  names the exact session and is stable.
+  /** Resume, prefixed with `cd <project>` so it runs in the session's own directory
+   *  (gemini scopes sessions — and `--resume` — to the current project).
    *
    *  Preference order:
-   *   - live source still on disk → point `--session-file` straight at it: a clean
-   *     one-liner, no temp file. This is the common case.
+   *   - `gemini --resume <sessionId>` when we have the content sessionId AND a project to
+   *     cd into. This is a TRUE resume: gemini's findSession matches `session.id === arg`
+   *     (the header UUID) before falling back to a numeric index, and continues the actual
+   *     session file. The id is stable — this is the form the user drives by hand.
+   *   - `gemini --session-file <live source>` when there's no usable id but the source is
+   *     on disk. NB this IMPORTS a copy (gemini stamps a fresh sessionId + an "Imported
+   *     session from …" marker) rather than continuing in place — a fallback, not the
+   *     preferred path.
    *   - source gone but an archived raw was kept (--keep-raw) → decompress the gzip to a
-   *     temp file first (the only way to round-trip a vanished source; gemini's own store
-   *     reaps files, see #10).
-   *   - neither → null (nothing to resume from). */
+   *     temp file and --session-file that (the only way to round-trip a vanished source;
+   *     gemini's own store reaps files, see #10). Also import semantics.
+   *   - nothing usable → null.
+   *
+   *  We do NOT emit `--resume <index>`: the numeric index is per-project and ephemeral, so
+   *  a copied `--resume 5` would resume the wrong session later — the UUID form is stable. */
   buildResumeCommand(input): string | null {
     const cd = input.projectPath ? `cd ${shellQuote(input.projectPath)} && ` : "";
+    const sessionId = input.agentSpecific?.contentSessionId;
+    if (input.projectPath && typeof sessionId === "string" && sessionId) {
+      return `${cd}gemini --resume ${shellQuote(sessionId)}`;
+    }
     if (input.sourcePath && !input.sourceGone) {
       return `${cd}gemini --session-file ${shellQuote(input.sourcePath)}`;
     }
